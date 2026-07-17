@@ -5,7 +5,7 @@ An AI-powered career assistant built with React Native + Expo.
 ## ✅ Quick Start
 
 ### 1. Install Node.js (if not installed)
-Download from https://nodejs.org (v18 or newer)
+Download Node.js 22 LTS from https://nodejs.org
 
 ### 2. Install Expo CLI
 ```bash
@@ -14,7 +14,6 @@ npm install -g expo-cli
 
 ### 3. Install dependencies
 ```bash
-cd careerAI
 npm install
 ```
 
@@ -59,7 +58,7 @@ Without a key, the app uses smart built-in fallbacks for all AI features.
 
 ## 🛠 Requirements
 
-- Node.js 18+
+- Node.js 22 LTS
 - npm 9+
 - Expo Go app on your phone (iOS or Android)
 
@@ -74,3 +73,8 @@ npx expo start --clear
 ```bash
 npm install --legacy-peer-deps
 ```
+
+**Could not determine Node.js install directory:**
+This usually means Windows is resolving `node`/`npm` from a broken or stale install.
+Run `where node` and `where npm` and make sure they point to the same Node.js install.
+If a dead path is still on PATH, remove it and reinstall Node.js 22 LTS.

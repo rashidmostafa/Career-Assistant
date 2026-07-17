@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org) v20 or newer installed on your computer
+- [Node.js](https://nodejs.org) 22 LTS installed on your computer
 - [Expo Go](https://expo.dev/go) app installed on your phone (App Store / Play Store)
 - Your phone and computer connected to the **same Wi-Fi network**
 
@@ -18,6 +18,7 @@
    ```
    npm install --legacy-peer-deps
    ```
+   If you see `Could not determine Node.js install directory`, fix your Windows PATH so `where node` and `where npm` resolve to the same Node.js installation, then reinstall Node.js 22 LTS.
 4. Start the Expo development server:
    ```
    npx expo start
