@@ -19,7 +19,7 @@ npm install
 
 ### 4. Start the app
 ```bash
-npx expo start
+npm run start
 ```
 
 ### 5. Open on your phone
@@ -66,7 +66,20 @@ Without a key, the app uses smart built-in fallbacks for all AI features.
 
 **Metro bundler error on start:**
 ```bash
-npx expo start --clear
+npm run start:clear
+```
+
+**Expo Go says: "Unknown error: The internet connection appears to be offline":**
+1. Use tunnel mode (already the default in this project):
+```bash
+npm run start
+```
+2. Ensure your laptop has internet access (tunnel needs internet on both laptop and phone).
+3. Disable VPN/Proxy on laptop or phone while testing.
+4. On Windows, allow Node.js through Firewall for Private networks.
+5. If it still fails, stop Expo and restart clean:
+```bash
+npm run start:clear
 ```
 
 **Package not found:**
