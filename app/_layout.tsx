@@ -10,6 +10,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { CVProvider } from "@/context/CVContext";
 import { JobsProvider } from "@/context/JobsContext";
+import { ThemeProvider } from "@/context/ThemeContext";
 import { RoadmapProvider } from "@/context/RoadmapContext";
 import { InterviewProvider } from "@/context/InterviewContext";
 import { PortfolioProvider } from "@/context/PortfolioContext";
@@ -43,25 +44,27 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
 function RootLayoutNav() {
   return (
-    <AuthProvider>
-      <CVProvider>
-        <JobsProvider>
-          <RoadmapProvider>
-            <InterviewProvider>
-              <PortfolioProvider>
-                <AuthGate>
-                  <Stack screenOptions={{ headerShown: false }}>
-                    <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                    <Stack.Screen name="auth" options={{ headerShown: false }} />
-                    <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-                  </Stack>
-                </AuthGate>
-              </PortfolioProvider>
-            </InterviewProvider>
-          </RoadmapProvider>
-        </JobsProvider>
-      </CVProvider>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <CVProvider>
+          <JobsProvider>
+            <RoadmapProvider>
+              <InterviewProvider>
+                <PortfolioProvider>
+                  <AuthGate>
+                    <Stack screenOptions={{ headerShown: false }}>
+                      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                      <Stack.Screen name="auth" options={{ headerShown: false }} />
+                      <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+                    </Stack>
+                  </AuthGate>
+                </PortfolioProvider>
+              </InterviewProvider>
+            </RoadmapProvider>
+          </JobsProvider>
+        </CVProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 

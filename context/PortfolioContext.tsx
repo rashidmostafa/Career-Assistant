@@ -36,6 +36,51 @@ interface PortfolioContextType {
 
 const PortfolioContext = createContext<PortfolioContextType | null>(null);
 
+function normalizeGithubMetrics(value: unknown): GithubMetrics | null {
+  if (!value || typeof value !== "object") return null;
+  const github = value as Partial<GithubMetrics>;
+
+  return {
+    username: typeof github.username === "string" ? github.username : "",
+    repos: typeof github.repos === "number" ? github.repos : 0,
+    stars: typeof github.stars === "number" ? github.stars : 0,
+    commits: typeof github.commits === "number" ? github.commits : 0,
+    topLanguages: Array.isArray(github.topLanguages)
+      ? github.topLanguages.filter((language): language is string => typeof language === "string")
+      : [],
+  };
+}
+
+function normalizeCodeforcesMetrics(value: unknown): CodeforcesMetrics | null {
+  if (!value || typeof value !== "object") return null;
+  const codeforces = value as Partial<CodeforcesMetrics>;
+
+  return {
+    handle: typeof codeforces.handle === "string" ? codeforces.handle : "",
+    rating: typeof codeforces.rating === "number" ? codeforces.rating : 0,
+    maxRating: typeof codeforces.maxRating === "number" ? codeforces.maxRating : 0,
+    solved: typeof codeforces.solved === "number" ? codeforces.solved : 0,
+    rank: typeof codeforces.rank === "string" ? codeforces.rank : "unrated",
+  };
+}
+
+function normalizePortfolio(value: unknown): Portfolio | null {
+  if (!value || typeof value !== "object") return null;
+
+  const portfolio = value as Partial<Portfolio>;
+  if (typeof portfolio.id !== "string" || typeof portfolio.userId !== "string") {
+    return null;
+  }
+
+  return {
+    id: portfolio.id,
+    userId: portfolio.userId,
+    github: normalizeGithubMetrics(portfolio.github),
+    codeforces: normalizeCodeforcesMetrics(portfolio.codeforces),
+    updatedAt: typeof portfolio.updatedAt === "string" ? portfolio.updatedAt : new Date().toISOString(),
+  };
+}
+
 export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
@@ -43,16 +88,26 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   const load = useCallback(async () => {
     if (!user) { setPortfolio(null); return; }
-    const data = await AsyncStorage.getItem(`portfolio_${user.id}`);
-    if (data) setPortfolio(JSON.parse(data));
-    else setPortfolio(null);
+    try {
+      const data = await AsyncStorage.getItem(`portfolio_${user.id}`);
+      if (!data) {
+        setPortfolio(null);
+        return;
+      }
+
+      setPortfolio(normalizePortfolio(JSON.parse(data)));
+    } catch {
+      setPortfolio(null);
+    }
   }, [user]);
 
   useEffect(() => { load(); }, [load]);
 
   const save = async (updated: Portfolio) => {
-    await AsyncStorage.setItem(`portfolio_${user!.id}`, JSON.stringify(updated));
-    setPortfolio(updated);
+    const normalized = normalizePortfolio(updated);
+    if (!normalized || !user) return;
+    await AsyncStorage.setItem(`portfolio_${user.id}`, JSON.stringify(normalized));
+    setPortfolio(normalized);
   };
 
   const syncGithub = async (username: string) => {

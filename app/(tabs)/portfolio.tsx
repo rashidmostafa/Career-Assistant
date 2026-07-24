@@ -1,4 +1,4 @@
-import { Github, Code2, CheckCircle2, Trash2, RefreshCw } from "lucide-react-native";
+import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useState } from "react";
 import {
@@ -25,6 +25,9 @@ export default function PortfolioScreen() {
   const [cfHandle, setCfHandle] = useState("");
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
+  const githubTopLanguages = Array.isArray(portfolio?.github?.topLanguages)
+    ? portfolio.github.topLanguages
+    : [];
 
   const handleGithub = async () => {
     if (!ghUsername.trim()) return;
@@ -60,7 +63,7 @@ export default function PortfolioScreen() {
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: portfolio?.github ? colors.success : "#000" }]}>
           <View style={styles.cardHeader}>
             <View style={[styles.iconWrap, { backgroundColor: colors.foreground }]}>
-              <Github size={24} color={colors.background} strokeWidth={2} />
+              <Feather name="github" size={24} color={colors.background} />
             </View>
             <View style={{ flex: 1, marginLeft: 16 }}>
               <Text style={[styles.cardTitle, { color: colors.foreground }]}>GitHub</Text>
@@ -89,7 +92,7 @@ export default function PortfolioScreen() {
               ))}
               <View style={[styles.metricBox, styles.metricWide, { backgroundColor: colors.background, borderColor: colors.border }]}>
                 <Text style={[styles.metricValue, { color: colors.foreground }]}>
-                  {portfolio.github.topLanguages.slice(0, 3).join(", ") || "—"}
+                  {githubTopLanguages.slice(0, 3).join(", ") || "—"}
                 </Text>
                 <Text style={[styles.metricLabel, { color: colors.mutedForeground }]}>Top Languages</Text>
               </View>
@@ -109,7 +112,7 @@ export default function PortfolioScreen() {
                 onPress={handleGithub}
                 disabled={isSyncing}
               >
-                {isSyncing ? <ActivityIndicator color={colors.background} size="small" /> : <RefreshCw size={20} color={colors.background} />}
+                {isSyncing ? <ActivityIndicator color={colors.background} size="small" /> : <Feather name="refresh-cw" size={20} color={colors.background} />}
               </TouchableOpacity>
             </View>
           )}
@@ -118,7 +121,7 @@ export default function PortfolioScreen() {
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: portfolio?.codeforces ? colors.success : "#000" }]}>
           <View style={styles.cardHeader}>
             <View style={[styles.iconWrap, { backgroundColor: "#1890ff" }]}>
-              <Code2 size={24} color="#fff" strokeWidth={2} />
+              <Feather name="code" size={24} color="#fff" />
             </View>
             <View style={{ flex: 1, marginLeft: 16 }}>
               <Text style={[styles.cardTitle, { color: colors.foreground }]}>Codeforces</Text>
@@ -165,7 +168,7 @@ export default function PortfolioScreen() {
                 onPress={handleCodeforces}
                 disabled={isSyncing}
               >
-                {isSyncing ? <ActivityIndicator color="#fff" size="small" /> : <RefreshCw size={20} color="#fff" />}
+                {isSyncing ? <ActivityIndicator color="#fff" size="small" /> : <Feather name="refresh-cw" size={20} color="#fff" />}
               </TouchableOpacity>
             </View>
           )}
@@ -174,7 +177,7 @@ export default function PortfolioScreen() {
         {portfolio && (
           <>
             <View style={[styles.infoBox, { backgroundColor: portfolioColor + "10", borderColor: portfolioColor + "30" }]}>
-              <CheckCircle2 size={20} color={portfolioColor} />
+              <Feather name="check-circle" size={20} color={portfolioColor} />
               <Text style={[styles.infoText, { color: colors.foreground }]}>
                 Your portfolio metrics will automatically appear in your optimized CV.
               </Text>
@@ -186,7 +189,7 @@ export default function PortfolioScreen() {
                 { text: "Clear", style: "destructive", onPress: clearPortfolio },
               ])}
             >
-              <Trash2 size={18} color={colors.destructive} />
+              <Feather name="trash-2" size={18} color={colors.destructive} />
               <Text style={[styles.clearText, { color: colors.destructive }]}>Clear all data</Text>
             </TouchableOpacity>
           </>

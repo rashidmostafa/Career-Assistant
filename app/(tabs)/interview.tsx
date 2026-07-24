@@ -79,7 +79,7 @@ export default function InterviewScreen() {
   if (phase === "home") {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border, backgroundColor: colors.background }]}>
+        <View style={[styles.header, styles.homeHeader, { paddingTop: topPad + 16, borderBottomColor: colors.border, backgroundColor: colors.background }]}>
           <Text style={[styles.headerTitle, { color: colors.foreground }]}>Mock Interview</Text>
           <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>Real questions · AI feedback · Precise scoring</Text>
         </View>
@@ -325,6 +325,7 @@ export default function InterviewScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth },
+  homeHeader: { flexDirection: "column", alignItems: "flex-start", gap: 2 },
   headerTitle: { fontSize: 22, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
   headerSub: { fontSize: 13, fontFamily: "Inter_500Medium", marginTop: 2 },
   startCard: { borderRadius: 28, padding: 32, alignItems: "center", marginBottom: 20, gap: 12 },

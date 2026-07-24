@@ -1,4 +1,6 @@
 import { BriefcaseBusiness, Map, FileText, Mic, TrendingUp, ChevronRight, Zap, Award } from "lucide-react-native";
+import { Feather } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React from "react";
@@ -16,6 +18,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useCV } from "@/context/CVContext";
 import { useJobs } from "@/context/JobsContext";
 import { useRoadmap } from "@/context/RoadmapContext";
+import { useThemeMode } from "@/context/ThemeContext";
 import { useColors } from "@/hooks/useColors";
 
 interface QuickAction {
@@ -31,12 +34,18 @@ export default function HomeScreen() {
   const colors = useColors() as any;
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { resolvedTheme, setThemeMode } = useThemeMode();
   const { user } = useAuth();
   const { cvProfile } = useCV();
   const { jobs, appliedJobIds } = useJobs();
   const { roadmap } = useRoadmap();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
+  const isDarkMode = resolvedTheme === "dark";
+
+  const handleThemeToggle = async () => {
+    await setThemeMode(isDarkMode ? "light" : "dark");
+  };
 
   const completedModules = roadmap?.modules.filter((m) => m.completed).length ?? 0;
   const totalModules = roadmap?.modules.length ?? 12;
@@ -92,6 +101,25 @@ export default function HomeScreen() {
       >
         <View style={[styles.hero, { paddingTop: topPad + 20, backgroundColor: colors.card, borderBottomColor: colors.border }]}>
           <View style={styles.heroInner}>
+            <TouchableOpacity
+              style={styles.themeToggleOuter}
+              onPress={handleThemeToggle}
+              accessibilityRole="button"
+              accessibilityLabel={`Switch to ${isDarkMode ? "light" : "dark"} mode`}
+            >
+              <LinearGradient
+                colors={isDarkMode ? ["#0f172a", colors.primary] : [colors.primary, colors.portfolio || "#ea580c"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.themeToggle}
+              >
+                <View style={[styles.themeToggleIcon, { backgroundColor: "rgba(255,255,255,0.18)" }]}>
+                  <Feather name={isDarkMode ? "sun" : "moon"} size={16} color="#fff" />
+                </View>
+                <Text style={styles.themeToggleText}>{isDarkMode ? "Light" : "Dark"}</Text>
+                <Feather name="chevron-right" size={16} color="#fff" />
+              </LinearGradient>
+            </TouchableOpacity>
             <Animated.View entering={FadeInDown.duration(400)}>
               <View style={styles.greetRow}>
                 <View style={[styles.aiDot, { backgroundColor: colors.success }]} />
@@ -203,7 +231,11 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   hero: { paddingBottom: 24, borderBottomWidth: StyleSheet.hairlineWidth, marginBottom: 0 },
-  heroInner: { paddingHorizontal: 24 },
+  heroInner: { paddingHorizontal: 24, position: "relative" },
+  themeToggleOuter: { position: "absolute", top: 0, right: 20, zIndex: 10, borderRadius: 999, shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.22, shadowRadius: 16, elevation: 8 },
+  themeToggle: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, minWidth: 110 },
+  themeToggleIcon: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  themeToggleText: { color: "#fff", fontSize: 13, fontFamily: "Inter_700Bold", lineHeight: 16 },
   greetRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
   aiDot: { width: 8, height: 8, borderRadius: 4 },
   greetLabel: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
