@@ -1,5 +1,6 @@
 import { Search, ArrowLeft, AlertCircle, Edit2, Check, Map, Clock, DollarSign, MapPin, Wifi, RefreshCw, ExternalLink, Send, Link, SlidersHorizontal, X, ShieldCheck, Star } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -299,7 +300,19 @@ export default function JobsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.headerWrap, { paddingTop: topPad + 16, borderBottomColor: colors.border, backgroundColor: colors.background }]}>
+      <View style={[styles.headerWrap, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}> 
+        <LinearGradient
+          colors={[
+            (jobsColor || "#2563eb") + "1f",
+            colors.background,
+            colors.card,
+          ]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.headerGradient}
+        />
+        <View style={[styles.headerBlob, styles.headerBlobOne, { backgroundColor: (jobsColor || "#2563eb") + "24" }]} />
+        <View style={[styles.headerBlob, styles.headerBlobTwo, { backgroundColor: colors.success + "1c" }]} />
         <View style={styles.headerTop}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.headerTitle, { color: colors.foreground }]}>Job Matches</Text>
@@ -348,6 +361,13 @@ export default function JobsScreen() {
           const isApplied = appliedJobIds.includes(item.id);
           return (
             <View style={[styles.jobCard, { backgroundColor: colors.card, borderColor: isApplied ? colors.success + "50" : colors.border }]}>
+              <LinearGradient
+                colors={[(jobsColor || "#2563eb") + "12", (jobsColor || "#2563eb") + "02"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.jobCardGlow}
+              />
+              <View style={[styles.jobCardAccent, { backgroundColor: isApplied ? colors.success : jobsColor }]} />
               <View style={styles.platformBadgeRow}>
                 <Text style={styles.platformIcon}>{item.platformIcon}</Text>
                 <Text style={[styles.platformBadgeText, { color: colors.mutedForeground }]}>{item.platformName}</Text>
@@ -492,21 +512,27 @@ export default function JobsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  headerWrap: { paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth },
+  headerWrap: { paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth, position: "relative", overflow: "hidden" },
+  headerGradient: { ...StyleSheet.absoluteFillObject },
+  headerBlob: { position: "absolute", borderRadius: 999 },
+  headerBlobOne: { width: 150, height: 150, right: -36, top: 14 },
+  headerBlobTwo: { width: 105, height: 105, left: -20, top: 54 },
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth },
   headerTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
   headerTitle: { fontSize: 24, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
   headerSub: { fontSize: 13, fontFamily: "Inter_500Medium", marginTop: 3 },
-  updateBadge: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  updateBadge: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" },
   updateText: { fontSize: 11, fontFamily: "Inter_500Medium" },
   backBtn: { marginRight: 16 },
   searchRow: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 24, marginVertical: 16 },
-  searchWrap: { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, borderWidth: 1 },
+  searchWrap: { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, borderWidth: 1, shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 2 },
   searchInput: { flex: 1, fontSize: 15, fontFamily: "Inter_500Medium" },
-  filterBtn: { width: 50, height: 50, borderRadius: 16, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  filterBtn: { width: 50, height: 50, borderRadius: 16, borderWidth: 1, alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 2 },
   filterCountBadge: { position: "absolute", top: -4, right: -4, minWidth: 18, height: 18, borderRadius: 9, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
   filterCountText: { color: "#fff", fontSize: 10, fontFamily: "Inter_700Bold" },
-  jobCard: { borderRadius: 20, padding: 20, borderWidth: 1, marginBottom: 16 },
+  jobCard: { borderRadius: 20, padding: 20, borderWidth: 1, marginBottom: 16, overflow: "hidden", position: "relative" },
+  jobCardGlow: { ...StyleSheet.absoluteFillObject },
+  jobCardAccent: { position: "absolute", left: 0, top: 14, bottom: 14, width: 4, borderTopRightRadius: 4, borderBottomRightRadius: 4 },
   jobCardDetail: { borderRadius: 20, padding: 24, borderWidth: 1, marginBottom: 24 },
   platformBadgeRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap" },
   platformIcon: { fontSize: 14 },
@@ -534,7 +560,7 @@ const styles = StyleSheet.create({
   skillChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
   skillText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
   actionRow: { flexDirection: "row", gap: 10, marginBottom: 10 },
-  applyNowBtnCard: { flexDirection: "row", alignItems: "center", gap: 6, justifyContent: "center", paddingVertical: 13, borderRadius: 12 },
+  applyNowBtnCard: { flexDirection: "row", alignItems: "center", gap: 6, justifyContent: "center", paddingVertical: 13, borderRadius: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.12, shadowRadius: 12, elevation: 3 },
   applyNowBtn: { flexDirection: "row", alignItems: "center", gap: 8, justifyContent: "center", paddingVertical: 14, paddingHorizontal: 24, borderRadius: 12 },
   applyNowText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 14 },
   coverBtnSmall: { flexDirection: "row", alignItems: "center", gap: 6, justifyContent: "center", paddingVertical: 13, borderRadius: 12, paddingHorizontal: 14 },

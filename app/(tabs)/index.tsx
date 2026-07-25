@@ -99,28 +99,47 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: bottomPad + 100 }}
       >
-        <View style={[styles.hero, { paddingTop: topPad + 20, backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+        <View style={[styles.hero, { paddingTop: topPad + 20, borderBottomColor: colors.border }]}>
+          <LinearGradient
+            colors={
+              isDarkMode
+                ? ["#0b1223", "#111827", colors.card]
+                : ["#fff7ed", "#fff", "#eef2ff"]
+            }
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.heroGradient}
+          />
+          <View style={[styles.heroBlob, styles.heroBlobOne, { backgroundColor: (colors.primary || "#2563eb") + "2b" }]} />
+          <View style={[styles.heroBlob, styles.heroBlobTwo, { backgroundColor: (colors.portfolio || "#ea580c") + "21" }]} />
           <View style={styles.heroInner}>
             <TouchableOpacity
               style={styles.themeToggleOuter}
               onPress={handleThemeToggle}
               accessibilityRole="button"
               accessibilityLabel={`Switch to ${isDarkMode ? "light" : "dark"} mode`}
+              activeOpacity={0.9}
             >
               <LinearGradient
-                colors={isDarkMode ? ["#0f172a", colors.primary] : [colors.primary, colors.portfolio || "#ea580c"]}
+                colors={
+                  isDarkMode
+                    ? ["rgba(15,23,42,0.92)", "rgba(37,99,235,0.9)"]
+                    : ["rgba(255,255,255,0.46)", "rgba(37,99,235,0.88)"]
+                }
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={styles.themeToggle}
+                style={[styles.themeToggle, { borderColor: isDarkMode ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.45)" }]}
               >
+                <View style={styles.themeToggleShine} />
                 <View style={[styles.themeToggleIcon, { backgroundColor: "rgba(255,255,255,0.18)" }]}>
                   <Feather name={isDarkMode ? "sun" : "moon"} size={16} color="#fff" />
                 </View>
-                <Text style={styles.themeToggleText}>{isDarkMode ? "Light" : "Dark"}</Text>
-                <Feather name="chevron-right" size={16} color="#fff" />
+                <View style={styles.themeToggleChevron}>
+                  <Feather name="chevron-right" size={15} color="#fff" />
+                </View>
               </LinearGradient>
             </TouchableOpacity>
-            <Animated.View entering={FadeInDown.duration(400)}>
+            <Animated.View entering={FadeInDown.duration(520).springify().damping(14)}>
               <View style={styles.greetRow}>
                 <View style={[styles.aiDot, { backgroundColor: colors.success }]} />
                 <Text style={[styles.greetLabel, { color: colors.mutedForeground }]}>AI Career Assistant</Text>
@@ -137,7 +156,7 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <Animated.View entering={FadeInDown.duration(500).delay(100)} style={{ paddingHorizontal: 24 }}>
+        <Animated.View entering={FadeInDown.duration(520).delay(90).springify().damping(14)} style={{ paddingHorizontal: 24 }}>
           <View style={styles.statsGrid}>
             {stats.map((s) => (
               <View key={s.label} style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -148,36 +167,45 @@ export default function HomeScreen() {
           </View>
         </Animated.View>
 
-        <Animated.View entering={FadeInDown.duration(500).delay(200)} style={styles.section}>
+        <Animated.View entering={FadeInDown.duration(520).delay(180).springify().damping(14)} style={styles.section}>
           <View style={styles.sectionHeader}>
             <Zap size={18} color={colors.primary} strokeWidth={2.5} />
             <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Quick Actions</Text>
           </View>
           {QUICK_ACTIONS.map((action, i) => (
-            <Animated.View key={action.id} entering={FadeInDown.duration(400).delay(i * 60 + 200)}>
+            <Animated.View key={action.id} entering={FadeInDown.duration(500).delay(i * 70 + 200).springify().damping(14)}>
               <TouchableOpacity
-                style={[styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                style={[styles.actionCard, { backgroundColor: colors.card, borderColor: action.color + "40" }]}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   router.push(action.route as any);
                 }}
                 activeOpacity={0.85}
               >
-                <View style={[styles.actionIconWrap, { backgroundColor: action.color + "15" }]}>
+                <LinearGradient
+                  colors={[action.color + "12", action.color + "04"]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.actionCardGlow}
+                />
+                <View style={[styles.actionAccent, { backgroundColor: action.color }]} />
+                <View style={[styles.actionIconWrap, { backgroundColor: action.color + "15", borderColor: action.color + "35" }]}>
                   <action.icon size={22} color={action.color} strokeWidth={2.5} />
                 </View>
                 <View style={styles.actionText}>
                   <Text style={[styles.actionLabel, { color: colors.foreground }]}>{action.label}</Text>
                   <Text style={[styles.actionDesc, { color: colors.mutedForeground }]}>{action.description}</Text>
                 </View>
-                <ChevronRight size={18} color={colors.mutedForeground} />
+                <View style={[styles.actionArrow, { backgroundColor: action.color + "17" }]}>
+                  <ChevronRight size={16} color={action.color} />
+                </View>
               </TouchableOpacity>
             </Animated.View>
           ))}
         </Animated.View>
 
         {roadmap && (
-          <Animated.View entering={FadeInDown.duration(400).delay(450)} style={styles.section}>
+          <Animated.View entering={FadeInDown.duration(500).delay(440).springify().damping(14)} style={styles.section}>
             <View style={styles.sectionHeader}>
               <TrendingUp size={18} color={colors.roadmap || "#059669"} strokeWidth={2.5} />
               <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Roadmap Progress</Text>
@@ -202,7 +230,7 @@ export default function HomeScreen() {
         )}
 
         {cvProfile && (
-          <Animated.View entering={FadeInDown.duration(400).delay(500)} style={[styles.section, { paddingBottom: 8 }]}>
+          <Animated.View entering={FadeInDown.duration(500).delay(500).springify().damping(14)} style={[styles.section, { paddingBottom: 8 }]}>
             <View style={styles.sectionHeader}>
               <Award size={18} color={colors.cv || "#0891b2"} strokeWidth={2.5} />
               <Text style={[styles.sectionTitle, { color: colors.foreground }]}>CV Status</Text>
@@ -231,28 +259,36 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   hero: { paddingBottom: 24, borderBottomWidth: StyleSheet.hairlineWidth, marginBottom: 0 },
+  heroGradient: { ...StyleSheet.absoluteFillObject },
+  heroBlob: { position: "absolute", borderRadius: 999 },
+  heroBlobOne: { width: 180, height: 180, right: -36, top: 20 },
+  heroBlobTwo: { width: 120, height: 120, left: -34, top: 76 },
   heroInner: { paddingHorizontal: 24, position: "relative" },
-  themeToggleOuter: { position: "absolute", top: 0, right: 20, zIndex: 10, borderRadius: 999, shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.22, shadowRadius: 16, elevation: 8 },
-  themeToggle: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, minWidth: 110 },
+  themeToggleOuter: { position: "absolute", top: 0, right: 20, zIndex: 10, borderRadius: 999, shadowColor: "#000", shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.3, shadowRadius: 18, elevation: 10 },
+  themeToggle: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, borderWidth: 1, overflow: "hidden" },
+  themeToggleShine: { position: "absolute", top: 0, left: 0, right: 0, height: "52%", backgroundColor: "rgba(255,255,255,0.17)" },
   themeToggleIcon: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  themeToggleText: { color: "#fff", fontSize: 13, fontFamily: "Inter_700Bold", lineHeight: 16 },
+  themeToggleChevron: { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.16)" },
   greetRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
   aiDot: { width: 8, height: 8, borderRadius: 4 },
   greetLabel: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   greetName: { fontSize: 30, fontFamily: "Inter_700Bold", letterSpacing: -1, marginBottom: 6 },
   greetSub: { fontSize: 15, fontFamily: "Inter_500Medium", lineHeight: 22 },
   statsGrid: { flexDirection: "row", gap: 10, marginTop: 20, marginBottom: 4 },
-  statCard: { flex: 1, borderRadius: 16, padding: 14, borderWidth: 1, alignItems: "center", gap: 4 },
+  statCard: { flex: 1, borderRadius: 16, padding: 14, borderWidth: 1, alignItems: "center", gap: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
   statValue: { fontFamily: "Inter_700Bold", fontSize: 20, letterSpacing: -0.5 },
-  statLabel: { fontFamily: "Inter_500Medium", fontSize: 10, textAlign: "center" },
+  statLabel: { fontFamily: "Inter_600SemiBold", fontSize: 10, textAlign: "center", letterSpacing: 0.6, textTransform: "uppercase" },
   section: { paddingHorizontal: 24, paddingTop: 24 },
   sectionHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 },
-  sectionTitle: { fontSize: 17, fontFamily: "Inter_700Bold", letterSpacing: -0.3 },
-  actionCard: { flexDirection: "row", alignItems: "center", gap: 16, borderRadius: 20, padding: 18, borderWidth: 1, marginBottom: 10 },
-  actionIconWrap: { width: 48, height: 48, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  sectionTitle: { fontSize: 17, fontFamily: "Inter_700Bold", letterSpacing: -0.35 },
+  actionCard: { flexDirection: "row", alignItems: "center", gap: 16, borderRadius: 20, padding: 18, borderWidth: 1, marginBottom: 10, overflow: "hidden", position: "relative" },
+  actionCardGlow: { ...StyleSheet.absoluteFillObject },
+  actionAccent: { position: "absolute", left: 0, top: 12, bottom: 12, width: 4, borderTopRightRadius: 4, borderBottomRightRadius: 4 },
+  actionIconWrap: { width: 48, height: 48, borderRadius: 16, alignItems: "center", justifyContent: "center", borderWidth: 1 },
   actionText: { flex: 1 },
   actionLabel: { fontSize: 16, fontFamily: "Inter_700Bold", marginBottom: 3, letterSpacing: -0.2 },
   actionDesc: { fontSize: 13, fontFamily: "Inter_500Medium" },
+  actionArrow: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
   progressCard: { borderRadius: 20, padding: 20, borderWidth: 1 },
   progressRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
   progressLabel: { fontFamily: "Inter_700Bold", fontSize: 15, flex: 1, paddingRight: 12 },

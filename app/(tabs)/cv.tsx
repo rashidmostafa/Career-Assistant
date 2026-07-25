@@ -20,6 +20,7 @@ import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
+import { LinearGradient } from "expo-linear-gradient";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
@@ -163,7 +164,15 @@ export default function CVScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border, backgroundColor: colors.card }]}>
+      <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}>
+        <LinearGradient
+          colors={[(cvColor || "#0891b2") + "20", colors.background, colors.card]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.headerGradient}
+        />
+        <View style={[styles.headerBlob, styles.headerBlobOne, { backgroundColor: (cvColor || "#0891b2") + "24" }]} />
+        <View style={[styles.headerBlob, styles.headerBlobTwo, { backgroundColor: colors.primary + "1c" }]} />
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>CV Engine</Text>
         <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>Upload PDF · AI optimisation · ATS scoring</Text>
       </View>
@@ -189,6 +198,7 @@ export default function CVScreen() {
                 const sel = selectedFormat === id;
                 return (
                   <TouchableOpacity key={id} style={[styles.formatCard, { borderColor: sel ? color : colors.border, backgroundColor: sel ? color + "10" : colors.card }]} onPress={() => { setSelectedFormat(id); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}>
+                    <View style={[styles.formatCardAccent, { backgroundColor: color }]} />
                     <View style={[styles.formatIcon, { backgroundColor: color + "20" }]}><Icon size={18} color={color} /></View>
                     <Text style={[styles.formatLabel, { color: sel ? color : colors.foreground }]}>{label}</Text>
                     <Text style={[styles.formatDesc, { color: colors.mutedForeground }]}>{description}</Text>
@@ -212,6 +222,12 @@ export default function CVScreen() {
               disabled={isPickingPdf || isAnalyzing}
               activeOpacity={0.8}
             >
+              <LinearGradient
+                colors={[cvColor + "14", cvColor + "03"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.uploadZoneGlow}
+              />
               {(isPickingPdf || isAnalyzing) ? (
                 <>
                   <ActivityIndicator color={cvColor} size="large" />
@@ -366,7 +382,11 @@ export default function CVScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth },
+  header: { paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth, position: "relative", overflow: "hidden" },
+  headerGradient: { ...StyleSheet.absoluteFillObject },
+  headerBlob: { position: "absolute", borderRadius: 999 },
+  headerBlobOne: { width: 140, height: 140, right: -30, top: 18 },
+  headerBlobTwo: { width: 96, height: 96, left: -20, top: 58 },
   headerTitle: { fontSize: 24, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
   headerSub: { fontSize: 14, fontFamily: "Inter_500Medium", marginTop: 4 },
   tabBar: { flexDirection: "row", marginHorizontal: 24, marginTop: 16, borderRadius: 12, padding: 4 },
@@ -375,13 +395,15 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 17, fontFamily: "Inter_700Bold", marginBottom: 6, letterSpacing: -0.3 },
   sectionSub: { fontSize: 13, fontFamily: "Inter_500Medium", marginBottom: 16, lineHeight: 20 },
   formatRow: { flexDirection: "row", gap: 10, marginBottom: 24 },
-  formatCard: { flex: 1, borderRadius: 14, padding: 12, borderWidth: 1.5, alignItems: "center", gap: 6 },
+  formatCard: { flex: 1, borderRadius: 14, padding: 12, borderWidth: 1.5, alignItems: "center", gap: 6, overflow: "hidden", position: "relative" },
+  formatCardAccent: { position: "absolute", left: 0, top: 10, bottom: 10, width: 3, borderTopRightRadius: 3, borderBottomRightRadius: 3 },
   formatIcon: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   formatLabel: { fontFamily: "Inter_700Bold", fontSize: 13 },
   formatDesc: { fontFamily: "Inter_500Medium", fontSize: 11, textAlign: "center", lineHeight: 14 },
   errorBox: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 12, borderWidth: 1, marginBottom: 16 },
   errorText: { flex: 1, fontSize: 13, fontFamily: "Inter_500Medium" },
-  uploadZone: { borderRadius: 20, borderWidth: 2, borderStyle: "dashed", padding: 40, alignItems: "center", gap: 12, marginBottom: 20 },
+  uploadZone: { borderRadius: 20, borderWidth: 2, borderStyle: "dashed", padding: 40, alignItems: "center", gap: 12, marginBottom: 20, overflow: "hidden", position: "relative" },
+  uploadZoneGlow: { ...StyleSheet.absoluteFillObject },
   uploadIconCircle: { width: 72, height: 72, borderRadius: 36, alignItems: "center", justifyContent: "center", marginBottom: 4 },
   uploadTitle: { fontSize: 18, fontFamily: "Inter_700Bold", letterSpacing: -0.3, textAlign: "center" },
   uploadFileName: { fontSize: 14, fontFamily: "Inter_600SemiBold", textAlign: "center" },
@@ -390,7 +412,7 @@ const styles = StyleSheet.create({
   uploadBadgeText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
   infoBox: { flexDirection: "row", alignItems: "flex-start", gap: 10, padding: 14, borderRadius: 14, borderWidth: 1 },
   infoText: { flex: 1, fontSize: 13, fontFamily: "Inter_500Medium", lineHeight: 20 },
-  scoreRow: { flexDirection: "row", alignItems: "center", borderRadius: 20, padding: 24, borderWidth: 1, marginBottom: 24, gap: 16 },
+  scoreRow: { flexDirection: "row", alignItems: "center", borderRadius: 20, padding: 24, borderWidth: 1, marginBottom: 24, gap: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.06, shadowRadius: 12, elevation: 2 },
   scoreLabel: { fontSize: 20, fontFamily: "Inter_700Bold", marginBottom: 6, letterSpacing: -0.5 },
   scoreNote: { fontSize: 14, fontFamily: "Inter_500Medium", lineHeight: 20 },
   breakdownCard: { borderRadius: 16, padding: 18, borderWidth: 1, marginBottom: 24, gap: 14 },
@@ -401,7 +423,7 @@ const styles = StyleSheet.create({
   breakdownValue: { fontSize: 13, fontFamily: "Inter_700Bold", minWidth: 40, textAlign: "right" },
   barTrack: { height: 8, borderRadius: 4, overflow: "hidden" },
   barFill: { height: "100%", borderRadius: 4 },
-  suggestionCard: { borderRadius: 16, padding: 16, borderWidth: 1, marginBottom: 12 },
+  suggestionCard: { borderRadius: 16, padding: 16, borderWidth: 1, marginBottom: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 1 },
   suggestionHeader: { flexDirection: "row", alignItems: "center", gap: 12 },
   suggNum: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
   suggTitle: { flex: 1, fontSize: 15, fontFamily: "Inter_700Bold" },
