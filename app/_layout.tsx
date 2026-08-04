@@ -19,25 +19,40 @@ SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
+// ── Auth + re-auth gate ───────────────────────────────────────────────────────
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { user, isLoading } = useAuth();
-  const router = useRouter();
+  const { user, isLoading, reauthUrgency } = useAuth();
+  const router   = useRouter();
   const segments = useSegments();
 
   useEffect(() => {
     if (isLoading) return;
-    const inAuth = segments[0] === "auth";
+
+    const inAuth       = segments[0] === "auth";
     const inOnboarding = segments[0] === "onboarding";
-    const inTabs = segments[0] === "(tabs)";
+    const inReauth     = (segments as string[]).some((s) => s === "auth-reauth");
+    const inTabs       = segments[0] === "(tabs)";
 
     if (!user && !inAuth) {
       router.replace("/auth");
-    } else if (user && !user.onboardingComplete && !inOnboarding) {
-      router.replace("/onboarding");
-    } else if (user && user.onboardingComplete && (inAuth || inOnboarding)) {
-      router.replace("/(tabs)");
+      return;
     }
-  }, [user, isLoading, segments, router]);
+
+    if (user && !user.onboardingComplete && !inOnboarding && !inAuth) {
+      router.replace("/onboarding");
+      return;
+    }
+
+    if (user && user.onboardingComplete && (inAuth || inOnboarding)) {
+      router.replace("/(tabs)");
+      return;
+    }
+
+    // 8-week re-auth: redirect to re-auth screen when session expires/grace
+    if (user && (reauthUrgency === "expired" || reauthUrgency === "grace") && !inReauth) {
+      router.replace("/auth-reauth");
+    }
+  }, [user, isLoading, segments, router, reauthUrgency]);
 
   return <>{children}</>;
 }
@@ -53,9 +68,12 @@ function RootLayoutNav() {
                 <PortfolioProvider>
                   <AuthGate>
                     <Stack screenOptions={{ headerShown: false }}>
-                      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                      <Stack.Screen name="auth" options={{ headerShown: false }} />
-                      <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+                      <Stack.Screen name="(tabs)"        options={{ headerShown: false }} />
+                      <Stack.Screen name="auth"          options={{ headerShown: false }} />
+                      <Stack.Screen name="auth-2fa"      options={{ headerShown: false, presentation: "modal" }} />
+                      <Stack.Screen name="auth-reauth"   options={{ headerShown: false, presentation: "modal" }} />
+                      <Stack.Screen name="auth-security" options={{ headerShown: false }} />
+                      <Stack.Screen name="onboarding"    options={{ headerShown: false }} />
                     </Stack>
                   </AuthGate>
                 </PortfolioProvider>
