@@ -606,6 +606,78 @@ const AuthService = {
     return { message: "Security questions saved." };
   },
 
+  // ── Social auth: issue session after OAuth callback ──────────────────────────
+  async issueSocialSession(user, req) {
+    if (!user) throw Object.assign(new Error("OAuth authentication failed."), { status: 401 });
+    const deviceId = req?.headers?.["x-device-id"] ?? "social-oauth";
+    await user.resetLoginAttempts?.();
+    await audit("social_login", user._id, req, { provider: user.provider });
+    return this._issueSession(user._id, deviceId, req);
+  },
+
+  // ── Biometric: register a credential hash ─────────────────────────────────
+  async registerBiometric(userId, { credentialIdHash }, req) {
+    if (!credentialIdHash || typeof credentialIdHash !== "string") {
+      throw Object.assign(new Error("credentialIdHash is required."), { status: 400 });
+    }
+    const hash = this.hashBiometricToken(credentialIdHash);
+    await User.findByIdAndUpdate(userId, {
+      biometricTokenHash:    hash,
+      biometricEnabled:      true,
+      biometricRegisteredAt: new Date(),
+    });
+    await audit("biometric_register", userId, req);
+    return { message: "Biometric credential registered." };
+  },
+
+  // ── Biometric: verify a credential and issue tokens ──────────────────────
+  async verifyBiometric({ userId, credentialIdHash }, req) {
+    if (!userId || !credentialIdHash) {
+      throw Object.assign(new Error("userId and credentialIdHash are required."), { status: 400 });
+    }
+    const user = await User.findById(userId).select("+biometricTokenHash");
+    if (!user || !user.biometricEnabled || !user.biometricTokenHash) {
+      throw Object.assign(new Error("Biometric login not enrolled for this account."), { status: 401 });
+    }
+    if (user.accountLocked) {
+      throw Object.assign(new Error("Account is locked. Please use password login."), { status: 403 });
+    }
+
+    const incomingHash  = Buffer.from(this.hashBiometricToken(credentialIdHash), "hex");
+    const storedHash    = Buffer.from(user.biometricTokenHash, "hex");
+    const match =
+      incomingHash.length === storedHash.length &&
+      crypto.timingSafeEqual(incomingHash, storedHash);
+
+    if (!match) {
+      await user.incrementLoginAttempts();
+      await audit("biometric_fail", userId, req, {}, false);
+      throw Object.assign(new Error("Biometric verification failed."), { status: 401 });
+    }
+
+    await user.resetLoginAttempts();
+    await audit("biometric_login", userId, req);
+    const deviceId = req?.headers?.["x-device-id"] ?? "biometric";
+    const tokens   = await this._issueSession(user._id, deviceId, req);
+    return { ...tokens, user: user.toSafeObject() };
+  },
+
+  // ── Biometric: disable ────────────────────────────────────────────────────
+  async disableBiometric(userId, req) {
+    await User.findByIdAndUpdate(userId, {
+      biometricTokenHash:    undefined,
+      biometricEnabled:      false,
+      biometricRegisteredAt: undefined,
+    });
+    await audit("biometric_disable", userId, req);
+    return { message: "Biometric login disabled." };
+  },
+
+  // ── Helper: SHA-256 hash of a biometric credential ID ────────────────────
+  hashBiometricToken(raw) {
+    return crypto.createHash("sha256").update(raw).digest("hex");
+  },
+
   // ── Internal helpers ──────────────────────────────────────────────────────────
   async _issueSession(userId, deviceId, req, sessionStartedAt) {
     const accessToken  = issueAccessToken(userId, deviceId);

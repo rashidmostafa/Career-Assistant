@@ -682,3 +682,173 @@ describe("Edge cases", () => {
     expect(result.error).toBeTruthy();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 12. Social OAuth & Biometric server endpoints
+// ─────────────────────────────────────────────────────────────────────────────
+describe("Social OAuth — AuthService.issueSocialSession", () => {
+  test("throws 401 when user is null", async () => {
+    const AuthService = require("../server/services/authService");
+    await expect(AuthService.issueSocialSession(null, {}))
+      .rejects.toMatchObject({ status: 401 });
+  });
+
+  test("issues tokens and returns accessToken + refreshToken for a valid user", async () => {
+    // Minimal user stub that matches what Mongoose would return
+    const fakeUser = {
+      _id: "user_social_001",
+      provider: "google",
+      resetLoginAttempts: jest.fn().mockResolvedValue(undefined),
+      toSafeObject: jest.fn().mockReturnValue({ id: "user_social_001", email: "g@test.com" }),
+    };
+    const AuthService = require("../server/services/authService");
+    const result = await AuthService.issueSocialSession(fakeUser, {
+      headers: { "user-agent": "test", "x-device-id": "dev-001" },
+      ip: "127.0.0.1",
+    });
+    expect(result).toHaveProperty("accessToken");
+    expect(result).toHaveProperty("refreshToken");
+    expect(result).toHaveProperty("expiresAt");
+    expect(typeof result.expiresAt).toBe("number");
+  });
+});
+
+describe("Biometric — AuthService hash helper", () => {
+  test("hashBiometricToken returns a 64-char hex string", () => {
+    const AuthService = require("../server/services/authService");
+    const hash = AuthService.hashBiometricToken("test-credential-id");
+    expect(typeof hash).toBe("string");
+    expect(hash).toHaveLength(64);
+    expect(/^[0-9a-f]+$/.test(hash)).toBe(true);
+  });
+
+  test("same input always produces the same hash (deterministic)", () => {
+    const AuthService = require("../server/services/authService");
+    const h1 = AuthService.hashBiometricToken("my-cred-id");
+    const h2 = AuthService.hashBiometricToken("my-cred-id");
+    expect(h1).toBe(h2);
+  });
+
+  test("different inputs produce different hashes", () => {
+    const AuthService = require("../server/services/authService");
+    const h1 = AuthService.hashBiometricToken("cred-A");
+    const h2 = AuthService.hashBiometricToken("cred-B");
+    expect(h1).not.toBe(h2);
+  });
+});
+
+describe("Biometric — registerBiometric validation", () => {
+  test("throws 400 when credentialIdHash is missing", async () => {
+    const AuthService = require("../server/services/authService");
+    await expect(AuthService.registerBiometric("uid-001", {}, {}))
+      .rejects.toMatchObject({ status: 400 });
+  });
+
+  test("throws 400 when credentialIdHash is not a string", async () => {
+    const AuthService = require("../server/services/authService");
+    await expect(AuthService.registerBiometric("uid-001", { credentialIdHash: 12345 }, {}))
+      .rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe("Biometric — verifyBiometric input validation", () => {
+  test("throws 400 when userId is missing", async () => {
+    const AuthService = require("../server/services/authService");
+    await expect(AuthService.verifyBiometric({ credentialIdHash: "abc" }, {}))
+      .rejects.toMatchObject({ status: 400 });
+  });
+
+  test("throws 400 when credentialIdHash is missing", async () => {
+    const AuthService = require("../server/services/authService");
+    await expect(AuthService.verifyBiometric({ userId: "uid-001" }, {}))
+      .rejects.toMatchObject({ status: 400 });
+  });
+
+  test("throws 401 when user is not found", async () => {
+    // User.findById returns null for unknown IDs (mocked by jest-mongodb or
+    // the in-memory mock set up in the existing beforeAll)
+    const AuthService = require("../server/services/authService");
+    await expect(
+      AuthService.verifyBiometric({ userId: "nonexistent-id-xyz", credentialIdHash: "abc123" }, {})
+    ).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe("Biometric — BiometricService.saveCredential / clearCredential", () => {
+  test("clearCredential resolves without error even when nothing is stored", async () => {
+    const { BiometricService } = require("../services/biometricService");
+    await expect(BiometricService.clearCredential()).resolves.not.toThrow();
+  });
+
+  test("isEnrolled returns false initially (nothing in AsyncStorage mock)", async () => {
+    const AsyncStorage = require("@react-native-async-storage/async-storage");
+    AsyncStorage.getItem.mockResolvedValueOnce(null);
+    const { BiometricService } = require("../services/biometricService");
+    const enrolled = await BiometricService.isEnrolled();
+    expect(enrolled).toBe(false);
+  });
+
+  test("isEnrolled returns true when AsyncStorage contains 'true'", async () => {
+    const AsyncStorage = require("@react-native-async-storage/async-storage");
+    AsyncStorage.getItem.mockResolvedValueOnce("true");
+    const { BiometricService } = require("../services/biometricService");
+    const enrolled = await BiometricService.isEnrolled();
+    expect(enrolled).toBe(true);
+  });
+});
+
+describe("Biometric — BiometricService.biometricLogin", () => {
+  test("returns null when not enrolled", async () => {
+    const AsyncStorage = require("@react-native-async-storage/async-storage");
+    AsyncStorage.getItem.mockResolvedValueOnce(null); // BIOMETRIC_ENABLED_KEY
+    const { BiometricService } = require("../services/biometricService");
+    const result = await BiometricService.biometricLogin();
+    expect(result).toBeNull();
+  });
+
+  test("returns null when biometric challenge fails", async () => {
+    const AsyncStorage = require("@react-native-async-storage/async-storage");
+    AsyncStorage.getItem.mockResolvedValueOnce("true");
+    const LocalAuth = require("expo-local-authentication");
+    LocalAuth.hasHardwareAsync.mockResolvedValueOnce(true);
+    LocalAuth.isEnrolledAsync.mockResolvedValueOnce(true);
+    LocalAuth.authenticateAsync.mockResolvedValueOnce({ success: false, error: "user_cancel" });
+    const { BiometricService } = require("../services/biometricService");
+    const result = await BiometricService.biometricLogin();
+    expect(result).toBeNull();
+  });
+});
+
+describe("Biometric — getBiometricLabel", () => {
+  test("returns 'Face ID' when FACIAL_RECOGNITION is supported", async () => {
+    const LocalAuth = require("expo-local-authentication");
+    LocalAuth.hasHardwareAsync.mockResolvedValueOnce(true);
+    LocalAuth.isEnrolledAsync.mockResolvedValueOnce(true);
+    LocalAuth.supportedAuthenticationTypesAsync.mockResolvedValueOnce([
+      LocalAuth.AuthenticationType.FACIAL_RECOGNITION,
+    ]);
+    const { BiometricService } = require("../services/biometricService");
+    const label = await BiometricService.getBiometricLabel();
+    expect(label).toBe("Face ID");
+  });
+
+  test("returns 'Fingerprint' when only fingerprint is supported", async () => {
+    const LocalAuth = require("expo-local-authentication");
+    LocalAuth.hasHardwareAsync.mockResolvedValueOnce(true);
+    LocalAuth.isEnrolledAsync.mockResolvedValueOnce(true);
+    LocalAuth.supportedAuthenticationTypesAsync.mockResolvedValueOnce([
+      LocalAuth.AuthenticationType.FINGERPRINT,
+    ]);
+    const { BiometricService } = require("../services/biometricService");
+    const label = await BiometricService.getBiometricLabel();
+    expect(label).toBe("Fingerprint");
+  });
+
+  test("returns 'Biometric' when hardware is unavailable", async () => {
+    const LocalAuth = require("expo-local-authentication");
+    LocalAuth.hasHardwareAsync.mockResolvedValueOnce(false);
+    const { BiometricService } = require("../services/biometricService");
+    const label = await BiometricService.getBiometricLabel();
+    expect(label).toBe("Biometric");
+  });
+});

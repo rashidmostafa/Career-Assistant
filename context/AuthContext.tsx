@@ -92,6 +92,8 @@ export interface AuthContextType {
   setSecurityQuestions: (questions: SecurityQuestion[]) => Promise<void>;
   verifySecurityAnswers: (answers: Array<{ question: string; answer: string }>) => Promise<boolean>;
   getSecurityQuestions: () => Promise<string[]>;
+  // ── Social auth ───────────────────────────────────────────────────────────────
+  signInWithSocial: (provider: "google" | "linkedin") => Promise<void>;
   // ── GDPR ─────────────────────────────────────────────────────────────────────
   exportData: () => Promise<object>;
   requestAccountDeletion: () => Promise<void>;
@@ -621,6 +623,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await persistUser({ ...user, consentGiven: true });
   }, [user]);
 
+  // ── Social sign-in ────────────────────────────────────────────────────────────
+  // Thin wrapper — SocialAuthService handles the OAuth flow and token persistence.
+  // After the deep-link callback, we reload the user profile from the server
+  // (or local store in offline/dev mode) so the context is up to date.
+  const signInWithSocial = useCallback(async (provider: "google" | "linkedin") => {
+    // Lazy-import to avoid bundling expo-web-browser unless called
+    const { SocialAuthService } = await import("@/services/socialAuthService");
+    await SocialAuthService[provider === "google" ? "signInWithGoogle" : "signInWithLinkedIn"]();
+    // After OAuth the session tokens are already saved by SocialAuthService.
+    // Try to fetch the live profile; fall back gracefully in offline/dev mode.
+    try {
+      const { AuthApiService } = await import("@/services/authApiService");
+      const profile = await AuthApiService.getProfile();
+      if (profile?.user) await persistUser(profile.user as User);
+    } catch {
+      // No backend in dev — leave user state as-is; the session is valid.
+    }
+  }, []);
+
   // ─────────────────────────────────────────────────────────────────────────────
   return (
     <AuthContext.Provider value={{
@@ -631,6 +652,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       completeOnboarding, resendVerification, confirmEmailVerified,
       verify2FA, loginWithBiometric, enrollBiometric, disableBiometric,
       reauthenticate, setSecurityQuestions, verifySecurityAnswers, getSecurityQuestions,
+      signInWithSocial,
       exportData, requestAccountDeletion, cancelAccountDeletion, grantConsent,
     }}>
       {children}

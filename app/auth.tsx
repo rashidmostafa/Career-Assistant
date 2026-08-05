@@ -32,6 +32,8 @@ import { PasswordStrengthBar } from "@/components/auth/PasswordStrengthBar";
 import { BiometricButton } from "@/components/auth/BiometricButton";
 import { SecurityQuestionsForm } from "@/components/auth/SecurityQuestionsForm";
 import { OtpService } from "@/services/otpService";
+import { SocialAuthService } from "@/services/socialAuthService";
+import { useBiometric } from "@/hooks/useBiometric";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -73,6 +75,9 @@ export default function AuthScreen() {
     pendingVerificationEmail, pendingUserId, biometricAvailable,
     biometricType, loginWithBiometric, setSecurityQuestions,
   } = useAuth();
+
+  // Biometric hook — drives real enrol/login/auto-prompt
+  const biometric = useBiometric();
 
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail]       = useState("");
@@ -118,24 +123,43 @@ export default function AuthScreen() {
     }
   }, [email, password, signIn, router]);
 
+  // ── Biometric auto-prompt on login screen mount ───────────────────────────────
+  React.useEffect(() => {
+    if (mode !== "login") return;
+    biometric.autoPromptOnMount(async (result) => {
+      // Save tokens + navigate — result.user is available if needed
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      router.replace("/(tabs)");
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
   // ── Biometric login ──────────────────────────────────────────────────────────
   const handleBiometricLogin = useCallback(async () => {
     setError(null);
     setLoading(true);
     try {
+      // Try the hook-based biometric login first (full server round-trip)
+      const result = await biometric.login();
+      if (result) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        router.replace("/(tabs)");
+        return;
+      }
+      // Fall back to legacy AuthContext biometric (local simulation)
       const ok = await loginWithBiometric();
       if (ok) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         router.replace("/(tabs)");
       } else {
-        setError("Biometric authentication failed. Please sign in with your password.");
+        setError(biometric.error ?? "Biometric authentication failed. Please sign in with your password.");
       }
     } catch (e: any) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, [loginWithBiometric, router]);
+  }, [biometric, loginWithBiometric, router]);
 
   // ── Register ─────────────────────────────────────────────────────────────────
   const handleRegister = useCallback(async () => {
@@ -521,23 +545,71 @@ function Divider({ colors, label }: any) {
 }
 
 function SocialRow({ colors }: any) {
-  const handleSocial = (name: string) => {
-    Alert.alert(`${name} Login`, "Social authentication requires backend OAuth setup. Configure EXPO_PUBLIC_API_URL to enable.");
+  const router = useRouter();
+  const [googleLoading,   setGoogleLoading]   = React.useState(false);
+  const [linkedinLoading, setLinkedinLoading] = React.useState(false);
+
+  const handleGoogle = async () => {
+    setGoogleLoading(true);
+    try {
+      await SocialAuthService.signInWithGoogle();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      router.replace("/(tabs)");
+    } catch (e: any) {
+      if (e?.message !== "Sign-in was cancelled.") {
+        Alert.alert("Google Sign-In Failed", e?.message ?? "Please try again.");
+      }
+    } finally {
+      setGoogleLoading(false);
+    }
   };
+
+  const handleLinkedIn = async () => {
+    setLinkedinLoading(true);
+    try {
+      await SocialAuthService.signInWithLinkedIn();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      router.replace("/(tabs)");
+    } catch (e: any) {
+      if (e?.message !== "Sign-in was cancelled.") {
+        Alert.alert("LinkedIn Sign-In Failed", e?.message ?? "Please try again.");
+      }
+    } finally {
+      setLinkedinLoading(false);
+    }
+  };
+
   return (
     <View style={styles.socialRow}>
-      {[["Google", "🇬"], ["LinkedIn", "🔗"]].map(([name, emoji]) => (
-        <TouchableOpacity
-          key={name}
-          style={[styles.socialBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
-          onPress={() => handleSocial(name)}
-          accessibilityRole="button"
-          accessibilityLabel={`Continue with ${name}`}
-        >
-          <Text style={styles.socialEmoji}>{emoji}</Text>
-          <Text style={[styles.socialLabel, { color: colors.foreground }]}>{name}</Text>
-        </TouchableOpacity>
-      ))}
+      <TouchableOpacity
+        style={[styles.socialBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
+        onPress={handleGoogle}
+        disabled={googleLoading || linkedinLoading}
+        accessibilityRole="button"
+        accessibilityLabel="Continue with Google"
+      >
+        {googleLoading ? (
+          <ActivityIndicator size="small" color={colors.foreground} />
+        ) : (
+          <Text style={styles.socialEmoji}>G</Text>
+        )}
+        <Text style={[styles.socialLabel, { color: colors.foreground }]}>Google</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.socialBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
+        onPress={handleLinkedIn}
+        disabled={googleLoading || linkedinLoading}
+        accessibilityRole="button"
+        accessibilityLabel="Continue with LinkedIn"
+      >
+        {linkedinLoading ? (
+          <ActivityIndicator size="small" color={colors.foreground} />
+        ) : (
+          <Text style={styles.socialEmoji}>in</Text>
+        )}
+        <Text style={[styles.socialLabel, { color: colors.foreground }]}>LinkedIn</Text>
+      </TouchableOpacity>
     </View>
   );
 }

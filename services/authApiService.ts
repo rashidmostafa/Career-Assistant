@@ -120,14 +120,14 @@ export const AuthApiService = {
     return apiFetch("/api/auth/verify-email", { method: "POST", body: JSON.stringify(payload) });
   },
 
-  async verifyPhoneOtp(payload: { userId: string; otp: string }): Promise<{ message: string }> {
-    if (!BASE) throw new Error("NO_BACKEND");
-    return apiFetch("/api/auth/verify-phone", { method: "POST", body: JSON.stringify(payload) });
-  },
-
-  async sendPhoneOtp(payload: { userId: string; phone: string }): Promise<{ message: string }> {
+  async sendPhoneOtp(payload: { phone: string }): Promise<{ message: string }> {
     if (!BASE) throw new Error("NO_BACKEND");
     return apiFetch("/api/auth/send-phone-otp", { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  async verifyPhoneOtp(payload: { phone: string; otp: string }): Promise<{ message: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/verify-phone", { method: "POST", body: JSON.stringify(payload) });
   },
 
   // ── Login ─────────────────────────────────────────────────────────────────────
@@ -141,40 +141,33 @@ export const AuthApiService = {
   },
 
   // ── 2FA ───────────────────────────────────────────────────────────────────────
-  async verify2fa(payload: {
+  async verify2FA(payload: {
     userId: string;
     code: string;
     method: "totp" | "sms" | "email" | "backup";
     trustDevice?: boolean;
-  }): Promise<AuthTokens & { user: any }> {
+  }): Promise<AuthResponse> {
     if (!BASE) throw new Error("NO_BACKEND");
     return apiFetch("/api/auth/2fa/verify", { method: "POST", body: JSON.stringify(payload) });
   },
 
-  async resend2faCode(payload: {
-    userId: string;
-    method: "sms" | "email";
-  }): Promise<{ message: string }> {
+  async resend2FA(payload: { userId: string; method: string }): Promise<{ message: string }> {
     if (!BASE) throw new Error("NO_BACKEND");
     return apiFetch("/api/auth/2fa/resend", { method: "POST", body: JSON.stringify(payload) });
   },
 
-  async setup2fa(method: "totp" | "sms" | "email"): Promise<{
-    qrUri?: string;
-    secret?: string;
-    backupCodes?: string[];
-  }> {
+  async setup2FA(): Promise<{ secret: string; qrCode: string | null; otpauthUrl: string }> {
     if (!BASE) throw new Error("NO_BACKEND");
-    return apiFetch("/api/auth/2fa/setup", { method: "POST", body: JSON.stringify({ method }) }, true);
+    return apiFetch("/api/auth/2fa/setup", { method: "POST" }, true);
   },
 
-  async disable2fa(code: string): Promise<void> {
+  async disable2FA(code: string): Promise<{ message: string }> {
     if (!BASE) throw new Error("NO_BACKEND");
     return apiFetch("/api/auth/2fa/disable", { method: "POST", body: JSON.stringify({ code }) }, true);
   },
 
-  // ── Token management ──────────────────────────────────────────────────────────
-  async refreshTokens(refreshToken: string): Promise<AuthTokens> {
+  // ── Tokens ────────────────────────────────────────────────────────────────────
+  async refresh(refreshToken: string): Promise<AuthTokens> {
     if (!BASE) throw new Error("NO_BACKEND");
     return apiFetch("/api/auth/refresh", { method: "POST", body: JSON.stringify({ refreshToken }) });
   },
@@ -184,78 +177,96 @@ export const AuthApiService = {
     return apiFetch("/api/auth/logout", { method: "POST", body: JSON.stringify({ refreshToken }) }, true);
   },
 
-  // ── Re-authentication ──────────────────────────────────────────────────────────
-  async reauthenticate(payload: {
-    method: "biometric" | "password" | "security_questions";
-    password?: string;
+  // ── Reauth ────────────────────────────────────────────────────────────────────
+  async reauth(payload: {
+    method: "password" | "security_questions";
+    credential?: string;
     answers?: Array<{ question: string; answer: string }>;
-    biometricToken?: string;
-  }): Promise<AuthTokens> {
+  }): Promise<AuthResponse> {
     if (!BASE) throw new Error("NO_BACKEND");
     return apiFetch("/api/auth/reauth", { method: "POST", body: JSON.stringify(payload) }, true);
   },
 
-  // ── Account recovery ──────────────────────────────────────────────────────────
-  async recoverAccount(payload: {
-    method: "email" | "sms" | "security_questions";
-    email?: string;
-    phone?: string;
-    answers?: Array<{ question: string; answer: string }>;
-  }): Promise<{ message: string; recoveryToken?: string }> {
+  // ── Recovery ──────────────────────────────────────────────────────────────────
+  async recoverAccount(payload: { email: string }): Promise<{ message: string }> {
     if (!BASE) throw new Error("NO_BACKEND");
     return apiFetch("/api/auth/recover", { method: "POST", body: JSON.stringify(payload) });
   },
 
+  async verifyRecoveryOtp(payload: { email: string; otp: string }): Promise<{ recoveryToken: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/verify-recovery-otp", { method: "POST", body: JSON.stringify(payload) });
+  },
+
   async resetPassword(payload: {
+    email: string;
     recoveryToken: string;
     newPassword: string;
-  }): Promise<void> {
+  }): Promise<{ message: string }> {
     if (!BASE) throw new Error("NO_BACKEND");
     return apiFetch("/api/auth/reset-password", { method: "POST", body: JSON.stringify(payload) });
   },
 
-  // ── Security questions ─────────────────────────────────────────────────────────
+  // ── Social OAuth helpers ──────────────────────────────────────────────────────
+  /** Returns the backend URL that starts the Google OAuth redirect flow. */
+  getGoogleAuthUrl(): string {
+    return `${BASE}/api/auth/google`;
+  },
+
+  /** Returns the backend URL that starts the LinkedIn OAuth redirect flow. */
+  getLinkedInAuthUrl(): string {
+    return `${BASE}/api/auth/linkedin`;
+  },
+
+  // ── Biometric ─────────────────────────────────────────────────────────────────
+  /**
+   * Register a biometric credential with the server.
+   * @param credentialIdHash SHA-256 hash of the device credential ID.
+   */
+  async registerBiometric(credentialIdHash: string): Promise<{ message: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch(
+      "/api/auth/biometric/register",
+      { method: "POST", body: JSON.stringify({ credentialIdHash }) },
+      true
+    );
+  },
+
+  /**
+   * Verify a biometric credential and receive JWT tokens.
+   * @param userId  The userId stored in SecureStore alongside the credential.
+   * @param credentialIdHash SHA-256 hash of the device credential ID.
+   */
+  async verifyBiometric(userId: string, credentialIdHash: string): Promise<AuthResponse> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch(
+      "/api/auth/biometric/verify",
+      { method: "POST", body: JSON.stringify({ userId, credentialIdHash }) }
+    );
+  },
+
+  /** Disable biometric login for the current user. */
+  async disableBiometric(): Promise<{ message: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/biometric/disable", { method: "POST" }, true);
+  },
+
+  // ── Security questions ────────────────────────────────────────────────────────
   async setSecurityQuestions(
     questions: Array<{ question: string; answer: string }>
-  ): Promise<void> {
+  ): Promise<{ message: string }> {
     if (!BASE) throw new Error("NO_BACKEND");
-    return apiFetch("/api/user/security-questions", { method: "POST", body: JSON.stringify({ questions }) }, true);
-  },
-
-  async getSecurityQuestions(): Promise<string[]> {
-    if (!BASE) throw new Error("NO_BACKEND");
-    const data = await apiFetch<{ questions: string[] }>("/api/user/security-questions", {}, true);
-    return data.questions;
-  },
-
-  // ── Push token registration ────────────────────────────────────────────────────
-  async registerPushToken(pushToken: string): Promise<void> {
-    if (!BASE) return; // silently ignore when offline
-    return apiFetch("/api/user/push-token", { method: "POST", body: JSON.stringify({ pushToken }) }, true);
+    return apiFetch(
+      "/api/user/security-questions",
+      { method: "POST", body: JSON.stringify({ questions }) },
+      true
+    );
   },
 
   // ── GDPR ──────────────────────────────────────────────────────────────────────
-  async exportData(format: "json" | "csv" = "json"): Promise<Blob> {
+  async exportData(): Promise<object> {
     if (!BASE) throw new Error("NO_BACKEND");
-    const token = await SessionManager.getAccessToken();
-    const deviceId = await SessionManager.getOrCreateDeviceId();
-    let retries = 0;
-    while (true) {
-      try {
-        const res = await fetch(`${BASE}/api/user/export?format=${format}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "X-Device-Id": deviceId,
-          },
-        });
-        if (!res.ok) throw new Error("Export failed");
-        return res.blob();
-      } catch (e: any) {
-        if (retries >= MAX_RETRIES) throw e;
-        await sleep(BASE_DELAY * Math.pow(2, retries));
-        retries++;
-      }
-    }
+    return apiFetch("/api/user/export", {}, true);
   },
 
   async grantConsent(): Promise<void> {

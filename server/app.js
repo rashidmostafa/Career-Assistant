@@ -1,6 +1,7 @@
 /**
  * Career Assistant — Auth API Server
  * Node.js + Express + MongoDB + JWT + bcrypt + TOTP (speakeasy)
+ * + Passport.js (Google / LinkedIn OAuth2) + Biometric token endpoints
  *
  * Endpoints:
  *   POST   /api/auth/register
@@ -13,6 +14,13 @@
  *   POST   /api/auth/reauth           (authenticated)
  *   POST   /api/auth/recover
  *   POST   /api/auth/reset-password
+ *   GET    /api/auth/google            -> Google OAuth redirect
+ *   GET    /api/auth/google/callback   -> Google OAuth callback
+ *   GET    /api/auth/linkedin          -> LinkedIn OAuth redirect
+ *   GET    /api/auth/linkedin/callback -> LinkedIn OAuth callback
+ *   POST   /api/auth/biometric/register (authenticated)
+ *   POST   /api/auth/biometric/verify
+ *   POST   /api/auth/biometric/disable (authenticated)
  *   GET    /api/user/profile          (authenticated)
  *   PATCH  /api/user/profile          (authenticated)
  *   POST   /api/user/security-questions (authenticated)
@@ -30,6 +38,7 @@ const express    = require("express");
 const helmet     = require("helmet");
 const cors       = require("cors");
 const { connectDB } = require("./config/db");
+const { initPassport } = require("./config/passport");
 const { generalLimiter, ipBlockMiddleware } = require("./middleware/rateLimiter");
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
@@ -64,6 +73,10 @@ app.set("trust proxy", 1);
 // ── Global rate limiting + IP block ──────────────────────────────────────────
 app.use(ipBlockMiddleware);
 app.use(generalLimiter);
+
+// ── Passport (session + strategies) ──────────────────────────────────────────
+// Must be called after body-parsing and before routes.
+initPassport(app);
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);

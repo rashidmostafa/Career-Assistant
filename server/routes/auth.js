@@ -1,7 +1,11 @@
 /**
  * Auth routes — /api/auth/*
+ * Includes: register, email/phone OTP, login, 2FA, refresh, logout,
+ *           reauth, recovery, reset-password, Google/LinkedIn OAuth,
+ *           and biometric register/verify/disable.
  */
 const express     = require("express");
+const passport    = require("passport");
 const router      = express.Router();
 const AuthService = require("../services/authService");
 const { authenticate } = require("../middleware/authMiddleware");
@@ -153,6 +157,109 @@ router.post("/verify-recovery-otp", recoveryLimiter, async (req, res) => {
 router.post("/reset-password", authLimiter, async (req, res) => {
   try {
     const result = await AuthService.resetPassword(req.body, req);
+    res.json(result);
+  } catch (e) {
+    res.status(e.status ?? 500).json({ message: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Google OAuth2
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Step 1: Redirect the browser to Google's consent screen.
+router.get("/google",
+  passport.authenticate("google", { session: true, scope: ["openid", "profile", "email"] })
+);
+
+// Step 2: Google redirects back here with an authorisation code.
+router.get("/google/callback",
+  passport.authenticate("google", { session: true, failureRedirect: "/api/auth/oauth/error" }),
+  async (req, res) => {
+    try {
+      const { accessToken, refreshToken, expiresAt } = await AuthService.issueSocialSession(req.user, req);
+      const appDeepLink = process.env.APP_DEEP_LINK ?? "career-assistant://";
+      // Redirect back to the mobile app with tokens embedded in the deep link.
+      res.redirect(
+        `${appDeepLink}oauth/callback?accessToken=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}&expiresAt=${expiresAt}`
+      );
+    } catch (e) {
+      console.error("[OAuth/Google] Session issue error:", e);
+      res.redirect(`${process.env.APP_DEEP_LINK ?? "career-assistant://"}oauth/error`);
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LinkedIn OAuth2
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Step 1: Redirect to LinkedIn.
+router.get("/linkedin",
+  passport.authenticate("linkedin", { session: true })
+);
+
+// Step 2: LinkedIn redirects back here.
+router.get("/linkedin/callback",
+  passport.authenticate("linkedin", { session: true, failureRedirect: "/api/auth/oauth/error" }),
+  async (req, res) => {
+    try {
+      const { accessToken, refreshToken, expiresAt } = await AuthService.issueSocialSession(req.user, req);
+      const appDeepLink = process.env.APP_DEEP_LINK ?? "career-assistant://";
+      res.redirect(
+        `${appDeepLink}oauth/callback?accessToken=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}&expiresAt=${expiresAt}`
+      );
+    } catch (e) {
+      console.error("[OAuth/LinkedIn] Session issue error:", e);
+      res.redirect(`${process.env.APP_DEEP_LINK ?? "career-assistant://"}oauth/error`);
+    }
+  }
+);
+
+// OAuth error fallback (shown if browser deep-link fails)
+router.get("/oauth/error", (_req, res) => {
+  res.status(400).json({ message: "Social sign-in failed. Please try again." });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Biometric
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/auth/biometric/register
+ * Body: { credentialIdHash: string }
+ * Authenticated — links a device biometric credential to the account.
+ */
+router.post("/biometric/register", authenticate, async (req, res) => {
+  try {
+    const result = await AuthService.registerBiometric(req.userId, req.body, req);
+    res.json(result);
+  } catch (e) {
+    res.status(e.status ?? 500).json({ message: e.message });
+  }
+});
+
+/**
+ * POST /api/auth/biometric/verify
+ * Body: { userId: string, credentialIdHash: string }
+ * Public — verifies a biometric credential and issues tokens.
+ */
+router.post("/biometric/verify", authLimiter, async (req, res) => {
+  try {
+    const result = await AuthService.verifyBiometric(req.body, req);
+    res.json(result);
+  } catch (e) {
+    res.status(e.status ?? 500).json({ message: e.message });
+  }
+});
+
+/**
+ * POST /api/auth/biometric/disable
+ * Authenticated — removes the stored biometric credential hash.
+ */
+router.post("/biometric/disable", authenticate, async (req, res) => {
+  try {
+    const result = await AuthService.disableBiometric(req.userId, req);
     res.json(result);
   } catch (e) {
     res.status(e.status ?? 500).json({ message: e.message });

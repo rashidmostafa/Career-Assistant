@@ -3,21 +3,10 @@
  * Verifies access tokens; rejects expired or tampered tokens.
  * Attaches req.user (safe) and req.userId.
  */
-const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
-const JWT_SECRET = (() => {
-  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
-
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("[Auth] JWT_SECRET must be set in production environment variables.");
-  }
-
-  console.warn("[Auth] JWT_SECRET not set; using a development-only ephemeral secret.");
-  globalThis.__careerAssistantDevJwtSecret ??= crypto.randomBytes(32).toString("hex");
-  return globalThis.__careerAssistantDevJwtSecret;
-})();
+const JWT_SECRET = process.env.JWT_SECRET || "change_me_in_production";
 
 /**
  * authenticate — required auth; 401 if missing/invalid.

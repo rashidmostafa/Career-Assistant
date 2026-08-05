@@ -2,7 +2,8 @@
  * User MongoDB schema.
  * bcrypt 12 rounds for password storage.
  * Includes: 2FA, biometric, security questions, session tracking,
- *           risk profile, account lockout, GDPR consent.
+ *           risk profile, account lockout, GDPR consent,
+ *           social OAuth (Google / LinkedIn), push notifications.
  */
 const mongoose = require("mongoose");
 const bcrypt   = require("bcryptjs");
@@ -19,12 +20,20 @@ const UserSchema = new mongoose.Schema({
   phone: { type: String, trim: true },
   passwordHash: { type: String, required: true },
 
+  // ── Social OAuth ──────────────────────────────────────────────────────────
+  provider:   { type: String, enum: ["local", "google", "linkedin"], default: "local" },
+  providerId: { type: String },        // provider's user ID
+  avatarUrl:  { type: String },        // avatar from social profile
+
   // ── Profile ───────────────────────────────────────────────────────────────
   targetRole:       { type: String, default: "" },
   experienceLevel:  { type: String, default: "" },
   background:       { type: String, default: "" },
   photoUri:         { type: String },
   onboardingComplete: { type: Boolean, default: false },
+
+  // ── Push notifications ────────────────────────────────────────────────────
+  pushToken: { type: String },
 
   // ── Verification ──────────────────────────────────────────────────────────
   emailVerified:        { type: Boolean, default: false },
@@ -39,7 +48,9 @@ const UserSchema = new mongoose.Schema({
   backupCodes:       { type: [String], select: false },
 
   // ── Biometric ─────────────────────────────────────────────────────────────
-  biometricEnabled: { type: Boolean, default: false },
+  biometricEnabled:      { type: Boolean, default: false },
+  biometricTokenHash:    { type: String, select: false },  // SHA-256 of device credential ID
+  biometricRegisteredAt: { type: Date },
 
   // ── Security questions ────────────────────────────────────────────────────
   securityQuestions: { type: [SecurityQuestionSchema], select: false },
@@ -70,6 +81,7 @@ const UserSchema = new mongoose.Schema({
 
 // ── Indexes ───────────────────────────────────────────────────────────────────
 UserSchema.index({ email: 1 });
+UserSchema.index({ provider: 1, providerId: 1 }, { sparse: true });
 UserSchema.index({ "trustedDevices.deviceId": 1 });
 UserSchema.index({ deletionScheduledAt: 1 }, { sparse: true });
 
@@ -117,6 +129,7 @@ UserSchema.methods.toSafeObject = function () {
   delete obj.totpSecret;
   delete obj.backupCodes;
   delete obj.securityQuestions;
+  delete obj.biometricTokenHash;
   return obj;
 };
 
