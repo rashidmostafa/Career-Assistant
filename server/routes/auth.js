@@ -168,24 +168,24 @@ router.post("/reset-password", authLimiter, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Step 1: Redirect the browser to Google's consent screen.
-router.get("/google",
-  passport.authenticate("google", { session: true, scope: ["openid", "profile", "email"] })
-);
-
-// Step 2: Google redirects back here with an authorisation code.
 router.get("/google/callback",
-  passport.authenticate("google", { session: true, failureRedirect: "/api/auth/oauth/error" }),
+  passport.authenticate("google", { 
+    session: true, 
+    failureRedirect: "/api/auth/oauth/error" 
+  }),
   async (req, res) => {
     try {
       const { accessToken, refreshToken, expiresAt } = await AuthService.issueSocialSession(req.user, req);
-      const appDeepLink = process.env.APP_DEEP_LINK ?? "career-assistant://";
-      // Redirect back to the mobile app with tokens embedded in the deep link.
-      res.redirect(
-        `${appDeepLink}oauth/callback?accessToken=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}&expiresAt=${expiresAt}`
-      );
+      
+      // ✅ FOR EXPO GO - Use Expo deep link format
+      const expoDeepLink = `exp://exp.host/@rashid011/career-assistant/--/oauth/callback?accessToken=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}&expiresAt=${expiresAt}`;
+      
+      // Redirect to Expo deep link
+      res.redirect(expoDeepLink);
+      
     } catch (e) {
       console.error("[OAuth/Google] Session issue error:", e);
-      res.redirect(`${process.env.APP_DEEP_LINK ?? "career-assistant://"}oauth/error`);
+      res.redirect(`exp://exp.host/@rashid011/career-assistant/--/oauth/error`);
     }
   }
 );

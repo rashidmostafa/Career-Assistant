@@ -7,6 +7,16 @@
  *  - Only the SHA-256 hash of the device credential ID is sent to the server.
  *  - expo-secure-store with WHEN_UNLOCKED_THIS_DEVICE_ONLY is used on iOS/Android.
  *  - AsyncStorage is used as a fallback for environments without SecureStore (e.g. web).
+ *
+ * Task 2 fix — Catch credential mismatches before they lock users out:
+ *  - validateCredentialUserId() checks the stored userId BEFORE showing the
+ *    native biometric prompt, preventing a mismatch from eating a biometric
+ *    attempt that counts toward the OS lockout counter.
+ *  - biometricLogin() now accepts an optional expectedUserId. When supplied,
+ *    it clears stale credentials and returns a descriptive error rather than
+ *    letting the system proceed with the wrong account's credential.
+ *  - clearIfMismatch() is exported so callers (AuthContext, useBiometric) can
+ *    proactively clean up without touching the full credential flow.
  */
 import * as LocalAuthentication from "expo-local-authentication";
 import * as SecureStore from "expo-secure-store";
@@ -15,9 +25,9 @@ import * as Crypto from "expo-crypto";
 
 export type BiometricType = "FaceID" | "Fingerprint" | "None";
 
-const CREDENTIAL_ID_KEY   = "auth_biometric_credential_id";   // raw device ID (local only)
-const BIOMETRIC_ENABLED_KEY = "auth_biometric_enabled";        // "true" | absent
-const USER_ID_KEY         = "auth_biometric_user_id";          // userId linked to credential
+const CREDENTIAL_ID_KEY    = "auth_biometric_credential_id";   // raw device ID (local only)
+const BIOMETRIC_ENABLED_KEY = "auth_biometric_enabled";         // "true" | absent
+const USER_ID_KEY          = "auth_biometric_user_id";          // userId linked to credential
 
 // ── SecureStore helpers ───────────────────────────────────────────────────────
 async function secureSet(key: string, value: string): Promise<void> {
@@ -89,10 +99,10 @@ export const BiometricService = {
       if (!available) return { success: false, error: "Biometrics not available on this device." };
 
       const result = await LocalAuthentication.authenticateAsync({
-        promptMessage:       prompt,
-        fallbackLabel:       "Use Passcode",
+        promptMessage:         prompt,
+        fallbackLabel:         "Use Passcode",
         disableDeviceFallback: false,
-        cancelLabel:         "Cancel",
+        cancelLabel:           "Cancel",
       });
 
       if (result.success) return { success: true };
@@ -110,6 +120,37 @@ export const BiometricService = {
     }
   },
 
+  // ── Task 2: Credential mismatch protection ────────────────────────────────
+
+  /**
+   * Task 2 — Check if the stored biometric userId matches the expected userId
+   * WITHOUT showing the native biometric prompt. Call this before any login
+   * attempt so a mismatch is detected before an OS biometric attempt is consumed.
+   *
+   * @returns "match" | "mismatch" | "missing"
+   */
+  async validateCredentialUserId(
+    expectedUserId: string,
+  ): Promise<"match" | "mismatch" | "missing"> {
+    const storedUserId = await secureGet(USER_ID_KEY);
+    if (!storedUserId) return "missing";
+    return storedUserId === expectedUserId ? "match" : "mismatch";
+  },
+
+  /**
+   * Task 2 — Clear biometric credentials when a mismatch is detected, so the
+   * stale entry cannot cause repeated biometric lockouts on future attempts.
+   * Safe to call defensively; a no-op if nothing is stored.
+   */
+  async clearIfMismatch(expectedUserId: string): Promise<boolean> {
+    const validation = await this.validateCredentialUserId(expectedUserId);
+    if (validation === "mismatch") {
+      await this.clearCredential();
+      return true; // credentials were stale and have been cleared
+    }
+    return false;
+  },
+
   /**
    * Save a credential ID + userId pair to SecureStore after a biometric check.
    * Returns the SHA-256 hash of the credential ID (to send to the server).
@@ -118,8 +159,8 @@ export const BiometricService = {
     const auth = await this.authenticate("Confirm your identity to enable biometric sign-in");
     if (!auth.success) return null;
 
-    await secureSet(CREDENTIAL_ID_KEY,    credentialId);
-    await secureSet(USER_ID_KEY,          userId);
+    await secureSet(CREDENTIAL_ID_KEY, credentialId);
+    await secureSet(USER_ID_KEY,       userId);
     await AsyncStorage.setItem(BIOMETRIC_ENABLED_KEY, "true");
 
     const hash = await sha256(credentialId);
@@ -137,14 +178,43 @@ export const BiometricService = {
 
   /**
    * Biometric login flow:
-   *  1. Prompts the user.
-   *  2. Reads credential ID + userId from SecureStore.
-   *  3. Returns them so the caller can POST to /api/auth/biometric/verify.
+   *  1. (Task 2) Validates the stored userId against expectedUserId BEFORE the prompt.
+   *     If a mismatch is found the credential is cleared and an error is returned,
+   *     preventing the OS biometric attempt counter from being decremented.
+   *  2. Prompts the user.
+   *  3. Reads credential ID + userId from SecureStore.
+   *  4. Returns them so the caller can POST to /api/auth/biometric/verify.
+   *
+   * @param expectedUserId  When provided, a pre-prompt mismatch check is performed.
    */
-  async biometricLogin(): Promise<{ credentialIdHash: string; userId: string } | null> {
+  async biometricLogin(
+    expectedUserId?: string,
+  ): Promise<{ credentialIdHash: string; userId: string } | null> {
     const enabledRaw = await AsyncStorage.getItem(BIOMETRIC_ENABLED_KEY);
     if (enabledRaw !== "true") return null;
 
+    // ── Task 2: validate before consuming a biometric attempt ────────────────
+    if (expectedUserId) {
+      const validation = await this.validateCredentialUserId(expectedUserId);
+
+      if (validation === "mismatch") {
+        // Clear the stale credential so it cannot cause repeated failures
+        await this.clearCredential();
+        // Returning null signals to the caller that login cannot proceed;
+        // the caller (AuthContext / useBiometric) should show a helpful error
+        // rather than the generic "Authentication failed."
+        return null;
+      }
+
+      if (validation === "missing") {
+        // Biometric was flagged as enabled but SecureStore entry is gone
+        // (e.g. app data was partially cleared). Reset the flag.
+        await AsyncStorage.removeItem(BIOMETRIC_ENABLED_KEY);
+        return null;
+      }
+    }
+
+    // ── Only show the native prompt after pre-checks pass ────────────────────
     const auth = await this.authenticate("Sign in with biometrics");
     if (!auth.success) return null;
 

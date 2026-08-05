@@ -82,6 +82,15 @@ initPassport(app);
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 
+// Add this BEFORE your other routes
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => {
   res.json({

@@ -74,6 +74,8 @@ export default function AuthScreen() {
     signIn, signUp, confirmEmailVerified, resendVerification,
     pendingVerificationEmail, pendingUserId, biometricAvailable,
     biometricType, loginWithBiometric, setSecurityQuestions,
+    // Task 3 — biometric enrolment prompt
+    shouldPromptBiometricEnroll, dismissBiometricPrompt, enrollBiometric,
   } = useAuth();
 
   // Biometric hook — drives real enrol/login/auto-prompt
@@ -133,6 +135,48 @@ export default function AuthScreen() {
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
+
+  // ── Task 3: Auto biometric enrolment prompt after first login ─────────────────
+  // Fires once after a successful password-based login or email verification
+  // when the device supports biometrics but the user has not yet enrolled.
+  // We show the native Alert here (in the auth screen) so the user sees it
+  // before being routed away, giving them a clear moment to respond.
+  React.useEffect(() => {
+    if (!shouldPromptBiometricEnroll) return;
+
+    const label = biometric.biometricLabel || "Biometric";
+    Alert.alert(
+      `Enable ${label} Sign-In?`,
+      `Sign in faster next time using ${label} instead of your password. Your biometric data never leaves this device.`,
+      [
+        {
+          text: "Not Now",
+          style: "cancel",
+          onPress: () => {
+            dismissBiometricPrompt();
+          },
+        },
+        {
+          text: `Enable ${label}`,
+          onPress: async () => {
+            // enrollBiometric() shows the native prompt internally
+            const userId = pendingUserId ?? undefined;
+            const ok = userId
+              ? await biometric.enroll(userId)
+              : await enrollBiometric();
+            if (ok) {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+            } else {
+              dismissBiometricPrompt();
+            }
+          },
+        },
+      ],
+      { cancelable: false },
+    );
+  // Only re-run when the flag flips to true — not on every render
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shouldPromptBiometricEnroll]);
 
   // ── Biometric login ──────────────────────────────────────────────────────────
   const handleBiometricLogin = useCallback(async () => {
