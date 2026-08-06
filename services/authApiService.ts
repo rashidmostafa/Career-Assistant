@@ -1,0 +1,320 @@
+/**
+ * AuthApiService — HTTP client for the Node.js/Express backend.
+ * Falls back to local simulation when EXPO_PUBLIC_API_URL is not set.
+ *
+ * Features:
+ *  - Automatic retry with exponential back-off for network failures
+ *  - Access-token auto-refresh on 401
+ *  - Device-ID header on every request
+ *  - Graceful NO_BACKEND error for offline development
+ */
+import { SessionManager } from "./sessionManager";
+
+const BASE        = process.env.EXPO_PUBLIC_API_URL ?? "";
+const MAX_RETRIES = 3;
+const BASE_DELAY  = 500; // ms
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function apiFetch<T = unknown>(
+  path: string,
+  init: RequestInit = {},
+  withAuth = false,
+  _retryCount = 0,
+): Promise<T> {
+  const url = `${BASE}${path}`;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init.headers as Record<string, string> ?? {}),
+  };
+
+  if (withAuth) {
+    const token = await SessionManager.getAccessToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const deviceId = await SessionManager.getOrCreateDeviceId();
+  headers["X-Device-Id"] = deviceId;
+
+  try {
+    const res = await fetch(url, { ...init, headers });
+
+    // Token expired — try to refresh once, then retry
+    if (res.status === 401 && withAuth && _retryCount === 0) {
+      const refreshToken = await SessionManager.getRefreshToken();
+      if (refreshToken) {
+        try {
+          const refreshed = await apiFetch<AuthTokens>(
+            "/api/auth/refresh",
+            { method: "POST", body: JSON.stringify({ refreshToken }) },
+            false,
+            1,
+          );
+          await SessionManager.saveTokens(refreshed);
+          headers["Authorization"] = `Bearer ${refreshed.accessToken}`;
+          const retryRes = await fetch(url, { ...init, headers });
+          if (retryRes.ok) return retryRes.json() as T;
+        } catch {
+          // Refresh failed — fall through to error
+        }
+      }
+    }
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const err = new Error((body as any).message ?? `Request failed: ${res.status}`) as any;
+      err.status = res.status;
+      err.code   = (body as any).code;
+      throw err;
+    }
+
+    return res.json() as T;
+  } catch (e: any) {
+    // Network error (not an HTTP error) — retry with exponential back-off
+    if (!e.status && _retryCount < MAX_RETRIES) {
+      const delay = BASE_DELAY * Math.pow(2, _retryCount);
+      await sleep(delay);
+      return apiFetch<T>(path, init, withAuth, _retryCount + 1);
+    }
+    throw e;
+  }
+}
+
+// ─── Types ─────────────────────────────────────────────────────────────────────
+export interface AuthTokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+}
+
+export interface AuthResponse extends AuthTokens {
+  user: any;
+  require2FA?: boolean;
+  requireReauth?: boolean;
+  riskScore?: number;
+  riskLevel?: string;
+}
+
+// ─── AuthApiService ────────────────────────────────────────────────────────────
+export const AuthApiService = {
+  // ── Registration ─────────────────────────────────────────────────────────────
+  async register(payload: {
+    name: string;
+    email: string;
+    password: string;
+    phone?: string;
+    securityQuestions?: Array<{ question: string; answer: string }>;
+    consentGiven?: boolean;
+    pushToken?: string;
+  }): Promise<{ message: string; userId: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/register", { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  async verifyEmailOtp(payload: { userId: string; otp: string }): Promise<{ message: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/verify-email", { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  async sendPhoneOtp(payload: { phone: string }): Promise<{ message: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/send-phone-otp", { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  async verifyPhoneOtp(payload: { phone: string; otp: string }): Promise<{ message: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/verify-phone", { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  // ── Login ─────────────────────────────────────────────────────────────────────
+  async login(payload: {
+    email: string;
+    password: string;
+    deviceId?: string;
+  }): Promise<AuthResponse> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/login", { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  // ── 2FA ───────────────────────────────────────────────────────────────────────
+  async verify2FA(payload: {
+    userId: string;
+    code: string;
+    method: "totp" | "sms" | "email" | "backup";
+    trustDevice?: boolean;
+  }): Promise<AuthResponse> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/2fa/verify", { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  async resend2FA(payload: { userId: string; method: string }): Promise<{ message: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/2fa/resend", { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  async setup2FA(): Promise<{ secret: string; qrCode: string | null; otpauthUrl: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/2fa/setup", { method: "POST" }, true);
+  },
+
+  async disable2FA(code: string): Promise<{ message: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/2fa/disable", { method: "POST", body: JSON.stringify({ code }) }, true);
+  },
+
+  // ── Tokens ────────────────────────────────────────────────────────────────────
+  async refresh(refreshToken: string): Promise<AuthTokens> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/refresh", { method: "POST", body: JSON.stringify({ refreshToken }) });
+  },
+
+  async logout(refreshToken: string): Promise<void> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/logout", { method: "POST", body: JSON.stringify({ refreshToken }) }, true);
+  },
+
+  // ── Reauth ────────────────────────────────────────────────────────────────────
+  async reauth(payload: {
+    method: "password" | "security_questions";
+    credential?: string;
+    answers?: Array<{ question: string; answer: string }>;
+  }): Promise<AuthResponse> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/reauth", { method: "POST", body: JSON.stringify(payload) }, true);
+  },
+
+  // ── Recovery ──────────────────────────────────────────────────────────────────
+  async recoverAccount(payload: { email: string }): Promise<{ message: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/recover", { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  async verifyRecoveryOtp(payload: { email: string; otp: string }): Promise<{ recoveryToken: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/verify-recovery-otp", { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  async resetPassword(payload: {
+    email: string;
+    recoveryToken: string;
+    newPassword: string;
+  }): Promise<{ message: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/reset-password", { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  // ── Social OAuth helpers ──────────────────────────────────────────────────────
+  /** Returns the backend URL that starts the Google OAuth redirect flow. */
+  getGoogleAuthUrl(): string {
+    return `${BASE}/api/auth/google`;
+  },
+
+  /** Returns the backend URL that starts the LinkedIn OAuth redirect flow. */
+  getLinkedInAuthUrl(): string {
+    return `${BASE}/api/auth/linkedin`;
+  },
+
+  // ── Biometric ─────────────────────────────────────────────────────────────────
+  /**
+   * Register a biometric credential with the server.
+   * @param credentialIdHash SHA-256 hash of the device credential ID.
+   */
+  async registerBiometric(credentialIdHash: string): Promise<{ message: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch(
+      "/api/auth/biometric/register",
+      { method: "POST", body: JSON.stringify({ credentialIdHash }) },
+      true
+    );
+  },
+
+  /**
+   * Verify a biometric credential and receive JWT tokens.
+   * @param userId  The userId stored in SecureStore alongside the credential.
+   * @param credentialIdHash SHA-256 hash of the device credential ID.
+   */
+  async verifyBiometric(userId: string, credentialIdHash: string): Promise<AuthResponse> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch(
+      "/api/auth/biometric/verify",
+      { method: "POST", body: JSON.stringify({ userId, credentialIdHash }) }
+    );
+  },
+
+  /** Disable biometric login for the current user. */
+  async disableBiometric(): Promise<{ message: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/biometric/disable", { method: "POST" }, true);
+  },
+
+  // ── Security questions ────────────────────────────────────────────────────────
+  async setSecurityQuestions(
+    questions: Array<{ question: string; answer: string }>
+  ): Promise<{ message: string }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch(
+      "/api/user/security-questions",
+      { method: "POST", body: JSON.stringify({ questions }) },
+      true
+    );
+  },
+
+  // ── GDPR ──────────────────────────────────────────────────────────────────────
+  async exportData(): Promise<object> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/user/export", {}, true);
+  },
+
+  async grantConsent(): Promise<void> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/user/consent", { method: "POST" }, true);
+  },
+
+  async requestDeletion(): Promise<{ message: string; scheduledAt: number }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/user/delete", { method: "POST" }, true);
+  },
+
+  async cancelDeletion(): Promise<void> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/user/delete/cancel", { method: "POST" }, true);
+  },
+
+  // ── User profile ──────────────────────────────────────────────────────────────
+  async getProfile(): Promise<any> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/user/profile", {}, true);
+  },
+
+  async updateProfile(data: Partial<{
+    name: string;
+    phone: string;
+    targetRole: string;
+    experienceLevel: string;
+    background: string;
+    photoUri: string;
+  }>): Promise<any> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/user/profile", { method: "PATCH", body: JSON.stringify(data) }, true);
+  },
+
+  // ── Session management ─────────────────────────────────────────────────────────
+  async getSessions(): Promise<{ sessions: any[] }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/user/sessions", {}, true);
+  },
+
+  async revokeSession(sessionId: string): Promise<void> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch(`/api/user/sessions/${sessionId}`, { method: "DELETE" }, true);
+  },
+
+  async getAuditLog(page = 1, limit = 20): Promise<{ logs: any[]; page: number; limit: number }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch(`/api/user/audit-log?page=${page}&limit=${limit}`, {}, true);
+  },
+};

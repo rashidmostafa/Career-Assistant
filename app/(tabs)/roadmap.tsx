@@ -1,11 +1,8 @@
-import { Map, ChevronDown, ChevronUp, CheckCircle2, Circle, BookOpen, Play, RefreshCw, Zap, ExternalLink, Lock } from "lucide-react-native";
-import * as Haptics from "expo-haptics";
-import { LinearGradient } from "expo-linear-gradient";
-import { Linking } from "react-native";
-import React, { useState, useMemo } from "react";
+import React, { useState, useCallback, useRef, useMemo } from "react";
 import {
-  ActivityIndicator,
+  Animated,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,324 +10,546 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRoadmap, type RoadmapModule } from "@/context/RoadmapContext";
+import { RefreshCw, Map, List, GitBranch, Settings2, Trash2, Zap } from "lucide-react-native";
+import * as Haptics from "expo-haptics";
+import { useRoadmap } from "@/context/RoadmapContext";
 import { useAuth } from "@/context/AuthContext";
-import { useCV } from "@/context/CVContext";
 import { useColors } from "@/hooks/useColors";
+import { MacroProgressHeader } from "@/components/roadmap/MacroProgressHeader";
+import { WeekCard } from "@/components/roadmap/WeekCard";
+import { CalendarView } from "@/components/roadmap/CalendarView";
+import { RiskBanner } from "@/components/roadmap/RiskBanner";
+import { SkillDependencyGraph } from "@/components/roadmap/SkillDependencyGraph";
+import { CelebrationOverlay } from "@/components/roadmap/CelebrationOverlay";
+import { AccessibilityControls } from "@/components/roadmap/AccessibilityControls";
+import type { EmergencyStrategy } from "@/context/RoadmapContext";
 
-const LEVELS = ["Beginner", "Intermediate", "Advanced"] as const;
-type Level = typeof LEVELS[number];
+// ─── Tab definitions ───────────────────────────────────────────────────────────
+type TabId = "list" | "calendar" | "graph" | "settings";
+const TABS: { id: TabId; label: string; Icon: React.ElementType }[] = [
+  { id: "list",     label: "Timeline", Icon: List      },
+  { id: "calendar", label: "Calendar", Icon: Map       },
+  { id: "graph",    label: "Skills",   Icon: GitBranch },
+  { id: "settings", label: "Settings", Icon: Settings2 },
+];
 
-const LEVEL_COLORS: Record<Level, string> = {
-  Beginner: "#22c55e",
-  Intermediate: "#f59e0b",
-  Advanced: "#ef4444",
-};
-
-const LEVEL_ICONS: Record<Level, string> = {
-  Beginner: "🌱",
-  Intermediate: "⚡",
-  Advanced: "🔥",
-};
-
-const RESOURCE_ICONS: Record<string, React.ElementType> = {
-  video: Play,
-  article: BookOpen,
-  course: Zap,
-};
-
-function ModuleCard({ module, onToggle, locked }: { module: RoadmapModule; onToggle: () => void; locked: boolean }) {
-  const colors = useColors() as any;
-  const roadmapColor = colors.roadmap || colors.primary;
-  const [expanded, setExpanded] = useState(false);
+// ─── Empty state ───────────────────────────────────────────────────────────────
+function EmptyState({ onGenerate, isGenerating, colors }: { onGenerate: () => void; isGenerating: boolean; colors: any }) {
+  const pulse = useRef(new Animated.Value(1)).current;
+  React.useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1.05, duration: 1200, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1,    duration: 1200, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
 
   return (
-    <View style={[styles.moduleCard, {
-      backgroundColor: locked ? colors.muted : colors.card,
-      borderColor: module.completed ? roadmapColor + "50" : colors.border,
-      opacity: locked ? 0.6 : 1,
-    }]}>
-      <TouchableOpacity style={styles.moduleHeader} onPress={() => !locked && setExpanded(!expanded)} activeOpacity={locked ? 1 : 0.85}>
-        <View style={styles.moduleHeaderLeft}>
-          <View style={[styles.weekBadge, { backgroundColor: module.completed ? roadmapColor + "20" : colors.secondary }]}>
-            <Text style={[styles.weekText, { color: module.completed ? roadmapColor : colors.mutedForeground }]}>Wk {module.week}</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.moduleTopic, { color: locked ? colors.mutedForeground : colors.foreground }]} numberOfLines={expanded ? undefined : 2}>{module.topic}</Text>
-            <View style={[styles.levelBadge, { backgroundColor: LEVEL_COLORS[module.level as Level] + "15" }]}>
-              <View style={[styles.levelDot, { backgroundColor: LEVEL_COLORS[module.level as Level] }]} />
-              <Text style={[styles.levelText, { color: LEVEL_COLORS[module.level as Level] }]}>{module.level}</Text>
-            </View>
-          </View>
-        </View>
-        <View style={styles.moduleHeaderRight}>
-          {locked ? (
-            <Lock size={18} color={colors.mutedForeground} />
-          ) : (
-            <TouchableOpacity style={[styles.checkBtn, { borderColor: module.completed ? roadmapColor : colors.border, backgroundColor: module.completed ? roadmapColor : "transparent" }]}
-              onPress={(e) => { e.stopPropagation?.(); onToggle(); }}>
-              {module.completed ? <CheckCircle2 size={20} color="#fff" /> : <Circle size={20} color={colors.mutedForeground} />}
-            </TouchableOpacity>
-          )}
-          {!locked && (expanded ? <ChevronUp size={20} color={colors.mutedForeground} /> : <ChevronDown size={20} color={colors.mutedForeground} />)}
-        </View>
-      </TouchableOpacity>
+    <View
+      style={styles.emptyWrap}
+      accessible
+      accessibilityRole="none"
+      accessibilityLabel="No roadmap yet. Tap the button to generate one."
+    >
+      <Animated.Text style={[styles.emptyEmoji, { transform: [{ scale: pulse }] }]}>🗺️</Animated.Text>
+      <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Your Living Roadmap</Text>
+      <Text style={[styles.emptySub, { color: colors.mutedForeground }]}>
+        A dynamic guide that adapts to your pace — not a rigid schedule you must follow.
+      </Text>
 
-      {expanded && !locked && (
-        <View style={styles.moduleBody}>
-          <Text style={[styles.moduleDesc, { color: colors.mutedForeground }]}>{module.description}</Text>
-          <Text style={[styles.subSection, { color: colors.foreground }]}>Tasks this week</Text>
-          {module.tasks.map((task, i) => (
-            <View key={i} style={styles.taskRow}>
-              <View style={[styles.taskDot, { backgroundColor: roadmapColor }]} />
-              <Text style={[styles.taskText, { color: colors.foreground }]}>{task}</Text>
-            </View>
-          ))}
-          {module.resources.length > 0 && (
-            <>
-              <Text style={[styles.subSection, { color: colors.foreground, marginTop: 16 }]}>Resources</Text>
-              {module.resources.map((r, i) => {
-                const Icon = RESOURCE_ICONS[r.type] || BookOpen;
-                return (
-                  <TouchableOpacity key={i} style={[styles.resourceRow, { backgroundColor: colors.muted, borderColor: colors.border }]} onPress={() => Linking.openURL(r.url)}>
-                    <View style={[styles.resourceIcon, { backgroundColor: roadmapColor + "20" }]}><Icon size={16} color={roadmapColor} /></View>
-                    <Text style={[styles.resourceTitle, { color: colors.foreground }]}>{r.title}</Text>
-                    <ExternalLink size={14} color={colors.mutedForeground} />
-                  </TouchableOpacity>
-                );
-              })}
-            </>
-          )}
+      <View style={[styles.levelPreview, { borderColor: colors.border }]}>
+        {["🌱 Beginner", "⚡ Intermediate", "🔥 Advanced"].map((l, i) => (
+          <Text key={i} style={[styles.levelLabel, { color: colors.foreground }]}>{l}</Text>
+        ))}
+      </View>
+
+      {[
+        "📊 Dynamic duration — weeks adapt to your learning pace",
+        "🎯 Job deadline tracking with 4 emergency strategies",
+        "🔗 Skill dependency visualisation with lock gates",
+        "🚀 Dual tracks: Job-Specific + Generic Career",
+        "🎉 Celebratory animations for milestones",
+        "♿ WCAG 2.1 AA accessible, reduced motion & high contrast",
+      ].map((f, i) => (
+        <View key={i} style={styles.featureRow}>
+          <Text style={[styles.featureText, { color: colors.mutedForeground }]}>{f}</Text>
         </View>
-      )}
+      ))}
+
+      <TouchableOpacity
+        style={[styles.generateBtn, { backgroundColor: colors.roadmap ?? colors.primary }]}
+        onPress={onGenerate}
+        disabled={isGenerating}
+        accessibilityRole="button"
+        accessibilityLabel="Generate my roadmap"
+        accessibilityState={{ busy: isGenerating }}
+      >
+        {isGenerating ? (
+          <RefreshCw size={20} color="#fff" />
+        ) : (
+          <Zap size={20} color="#fff" />
+        )}
+        <Text style={styles.generateBtnText}>
+          {isGenerating ? "Generating…" : "Generate My Roadmap"}
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
+// ─── Main screen ───────────────────────────────────────────────────────────────
 export default function RoadmapScreen() {
-  const colors = useColors() as any;
-  const roadmapColor = colors.roadmap || colors.primary;
-  const insets = useSafeAreaInsets();
+  const insets  = useSafeAreaInsets();
+  const colors  = useColors() as any;
   const { user } = useAuth();
-  const { cvProfile } = useCV();
-  const { roadmap, isGenerating, generateRoadmap, toggleModule, clearRoadmap } = useRoadmap();
-  const topPad = Platform.OS === "web" ? 67 : insets.top;
-  const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
+  const {
+    weeks, isGenerating, macroProgress, completedWeeks, totalWeeks,
+    targetRole, careerTrackSkills, jobDeadlines, lastRegeneratedAt,
+    reducedMotion, highContrast,
+    generateRoadmap, toggleSkillStatus, markWeekComplete, clearRoadmap,
+    setViewMode, setReducedMotion, setHighContrast,
+    applyEmergencyStrategy, dismissExpiredJob,
+  } = useRoadmap();
 
-  const skillGaps = useMemo(() => cvProfile?.suggestions?.slice(0, 3) || [], [cvProfile]);
+  const roadmapColor = colors.roadmap ?? colors.primary;
 
-  const handleGenerate = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const role = user?.targetRole || "Software Engineer";
-    const level = user?.experienceLevel || "";
-    await generateRoadmap(skillGaps, role, level);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  };
+  const [activeTab, setActiveTab]         = useState<TabId>("list");
+  const [selectedWeekId, setSelectedWeekId] = useState<string | null>(null);
+  const [refreshing, setRefreshing]       = useState(false);
+  const [celebration, setCelebration]     = useState<{
+    visible: boolean;
+    type: "week" | "milestone" | "graduation";
+    title: string;
+    subtitle?: string;
+  }>({ visible: false, type: "week", title: "" });
 
-  // Group modules by level in order
-  const modulesByLevel = useMemo(() => {
-    if (!roadmap) return {} as Record<Level, RoadmapModule[]>;
-    return LEVELS.reduce((acc, lv) => {
-      acc[lv] = roadmap.modules.filter((m) => m.level === lv);
-      return acc;
-    }, {} as Record<Level, RoadmapModule[]>);
-  }, [roadmap]);
+  const fadeTrans = useRef(new Animated.Value(1)).current;
 
-  const completionByLevel = useMemo(() => {
-    if (!roadmap) return {} as Record<Level, number>;
-    return LEVELS.reduce((acc, lv) => {
-      const mods = modulesByLevel[lv] || [];
-      acc[lv] = mods.length === 0 ? 0 : mods.filter((m) => m.completed).length / mods.length;
-      return acc;
-    }, {} as Record<Level, number>);
-  }, [roadmap, modulesByLevel]);
+  // ── Generate ────────────────────────────────────────────────────────────────
+  const handleGenerate = useCallback(async () => {
+    if (!user) return;
+    const skillGaps = (user.background ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    await generateRoadmap(skillGaps, user.targetRole || "Frontend Developer", user.experienceLevel || "Intermediate");
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  }, [user, generateRoadmap]);
 
-  const isLevelUnlocked = (lv: Level): boolean => {
-    const idx = LEVELS.indexOf(lv);
-    if (idx === 0) return true;
-    const prevLevel = LEVELS[idx - 1];
-    return completionByLevel[prevLevel] >= 0.5; // unlock next when 50% of current done
-  };
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await handleGenerate();
+    setRefreshing(false);
+  }, [handleGenerate]);
 
-  const totalCompleted = roadmap?.modules.filter((m) => m.completed).length ?? 0;
-  const totalModules = roadmap?.modules.length ?? 12;
-  const progressPct = totalModules > 0 ? Math.round((totalCompleted / totalModules) * 100) : 0;
+  // ── Week complete ────────────────────────────────────────────────────────────
+  const handleWeekComplete = useCallback(async (weekId: string) => {
+    const week = weeks.find((w) => w.id === weekId);
+    if (!week) return;
+    await markWeekComplete(weekId);
 
-  if (!roadmap) {
-    return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}>
-          <LinearGradient
-            colors={[(roadmapColor || "#2563eb") + "18", colors.card, colors.background]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.headerGradient}
-          />
-          <View style={[styles.headerBlob, styles.headerBlobOne, { backgroundColor: (roadmapColor || "#2563eb") + "18" }]} />
-          <View style={[styles.headerBlob, styles.headerBlobTwo, { backgroundColor: colors.success + "14" }]} />
-          <View>
-            <Text style={[styles.headerTitle, { color: colors.foreground }]}>Roadmap</Text>
-            <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>Role-specific · 3 levels · 12 weeks</Text>
-          </View>
-        </View>
-        <View style={styles.emptyContainer}>
-          <View style={[styles.emptyIcon, { backgroundColor: roadmapColor + "15" }]}>
-            <Map size={40} color={roadmapColor} />
-          </View>
-          <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Your Roadmap Awaits</Text>
-          <Text style={[styles.emptySub, { color: colors.mutedForeground }]}>
-            Generate a 12-week learning roadmap tailored to your target role:{" "}
-            <Text style={{ fontFamily: "Inter_700Bold", color: colors.foreground }}>{user?.targetRole || "Not set"}</Text>
-          </Text>
-          <View style={[styles.levelPreview, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            {LEVELS.map((lv, i) => (
-              <View key={lv} style={styles.levelPreviewItem}>
-                <Text style={styles.levelPreviewIcon}>{LEVEL_ICONS[lv]}</Text>
-                <Text style={[styles.levelPreviewLabel, { color: LEVEL_COLORS[lv] }]}>{lv}</Text>
-                {i < LEVELS.length - 1 && <Text style={{ color: colors.mutedForeground, marginHorizontal: 4 }}>→</Text>}
-              </View>
-            ))}
-          </View>
-          <TouchableOpacity style={[styles.generateBtn, { backgroundColor: roadmapColor, opacity: isGenerating ? 0.7 : 1 }]} onPress={handleGenerate} disabled={isGenerating}>
-            {isGenerating ? <ActivityIndicator color="#fff" size="small" /> : <Zap size={22} color="#fff" />}
-            <Text style={styles.generateBtnText}>{isGenerating ? "Generating Roadmap…" : "Generate My Roadmap"}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
+    const newDone = completedWeeks + 1;
+    const isGrad  = newDone >= totalWeeks;
+    const isMile  = !isGrad && (newDone % 3 === 0 || newDone === Math.floor(totalWeeks / 2));
 
+    setCelebration({
+      visible: true,
+      type: isGrad ? "graduation" : isMile ? "milestone" : "week",
+      title: isGrad
+        ? "Roadmap Complete! 🎓"
+        : isMile
+        ? `${newDone} Weeks Done! 🌟`
+        : `Week ${week.weekNumber} Complete!`,
+      subtitle: isGrad
+        ? "You've mastered all the skills. Time to land that role!"
+        : isMile
+        ? `${newDone} weeks of consistent learning. Your skills are growing fast!`
+        : `"${week.topic}" — knowledge locked in. Keep going!`,
+    });
+  }, [weeks, completedWeeks, totalWeeks, markWeekComplete]);
+
+  // ── Tab switch ───────────────────────────────────────────────────────────────
+  const switchTab = useCallback((tab: TabId) => {
+    if (!reducedMotion) {
+      Animated.sequence([
+        Animated.timing(fadeTrans, { toValue: 0.6, duration: 80, useNativeDriver: true }),
+        Animated.timing(fadeTrans, { toValue: 1,   duration: 200, useNativeDriver: true }),
+      ]).start();
+    }
+    setActiveTab(tab);
+    if (tab === "list")     setViewMode("list");
+    if (tab === "calendar") setViewMode("calendar");
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  }, [reducedMotion, fadeTrans, setViewMode]);
+
+  const selectedWeek = useMemo(() => weeks.find((w) => w.id === selectedWeekId) ?? null, [weeks, selectedWeekId]);
+  const hasRoadmap   = weeks.length > 0;
+
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}>
-        <LinearGradient
-          colors={[(roadmapColor || "#2563eb") + "18", colors.card, colors.background]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.headerGradient}
-        />
-        <View style={[styles.headerBlob, styles.headerBlobOne, { backgroundColor: (roadmapColor || "#2563eb") + "18" }]} />
-        <View style={[styles.headerBlob, styles.headerBlobTwo, { backgroundColor: colors.success + "14" }]} />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.headerTitle, { color: colors.foreground }]}>Roadmap</Text>
-          <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>{roadmap.role} · {progressPct}% complete</Text>
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
+
+      {/* Screen header */}
+      <View
+        style={[
+          styles.screenHeader,
+          {
+            backgroundColor: colors.background,
+            borderBottomColor: colors.border,
+            paddingTop: insets.top + (Platform.OS === "android" ? 8 : 4),
+          },
+        ]}
+      >
+        <View style={styles.headerTop}>
+          <View>
+            <Text
+              style={[styles.screenTitle, { color: colors.foreground }]}
+              accessibilityRole="header"
+            >
+              Roadmap
+            </Text>
+            {hasRoadmap && (
+              <Text style={[styles.screenSub, { color: colors.mutedForeground }]}>
+                {targetRole} · {totalWeeks} weeks
+              </Text>
+            )}
+          </View>
+
+          {hasRoadmap && (
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                style={[styles.iconBtn, { borderColor: colors.border }]}
+                onPress={handleRefresh}
+                disabled={isGenerating}
+                accessibilityRole="button"
+                accessibilityLabel="Regenerate roadmap"
+              >
+                <RefreshCw size={18} color={isGenerating ? colors.mutedForeground : roadmapColor} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.iconBtn, { borderColor: colors.border }]}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                  clearRoadmap();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear roadmap"
+              >
+                <Trash2 size={18} color={colors.destructive} />
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
-        <TouchableOpacity style={[styles.refreshBtn, { backgroundColor: colors.muted }]} onPress={() => { clearRoadmap(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}>
-          <RefreshCw size={18} color={colors.mutedForeground} />
-        </TouchableOpacity>
+
+        {/* View tabs */}
+        {hasRoadmap && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.tabsRow}
+            accessibilityRole="tablist"
+          >
+            {TABS.map((t) => {
+              const active = activeTab === t.id;
+              return (
+                <TouchableOpacity
+                  key={t.id}
+                  style={[styles.tab, active && { borderBottomColor: roadmapColor }]}
+                  onPress={() => switchTab(t.id)}
+                  accessibilityRole="tab"
+                  accessibilityLabel={t.label}
+                  accessibilityState={{ selected: active }}
+                >
+                  <t.Icon size={15} color={active ? roadmapColor : colors.mutedForeground} />
+                  <Text
+                    style={[
+                      styles.tabLabel,
+                      { color: active ? roadmapColor : colors.mutedForeground },
+                      active && { fontFamily: "Inter_700Bold" },
+                    ]}
+                  >
+                    {t.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: bottomPad + 100 }} showsVerticalScrollIndicator={false}>
-        {/* Overall progress */}
-        <View style={[styles.progressCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={styles.progressRow}>
-            <Text style={[styles.progressTitle, { color: colors.foreground }]}>Overall Progress</Text>
-            <Text style={[styles.progressPct, { color: roadmapColor }]}>{progressPct}%</Text>
-          </View>
-          <View style={[styles.progressBar, { backgroundColor: colors.muted }]}>
-            <View style={[styles.progressFill, { width: `${progressPct}%`, backgroundColor: roadmapColor }]} />
-          </View>
-          <Text style={[styles.progressSub, { color: colors.mutedForeground }]}>{totalCompleted} of {totalModules} weeks completed</Text>
-        </View>
+      {/* Body */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 110 }]}
+        refreshControl={
+          hasRoadmap ? (
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={roadmapColor}
+              title="Adapting your roadmap…"
+            />
+          ) : undefined
+        }
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Empty state */}
+        {!hasRoadmap && !isGenerating && (
+          <EmptyState onGenerate={handleGenerate} isGenerating={isGenerating} colors={colors} />
+        )}
 
-        {/* Level sections */}
-        {LEVELS.map((lv) => {
-          const mods = modulesByLevel[lv] || [];
-          if (mods.length === 0) return null;
-          const unlocked = isLevelUnlocked(lv);
-          const lvCompleted = mods.filter((m) => m.completed).length;
-          const lvPct = mods.length > 0 ? Math.round((lvCompleted / mods.length) * 100) : 0;
+        {/* Generating state */}
+        {isGenerating && (
+          <View
+            style={styles.generatingWrap}
+            accessible
+            accessibilityLiveRegion="polite"
+            accessibilityLabel="Generating your roadmap"
+          >
+            <RefreshCw size={28} color={roadmapColor} />
+            <Text style={[styles.genTitle, { color: colors.foreground }]}>
+              Building your dynamic roadmap…
+            </Text>
+            <Text style={[styles.genSub, { color: colors.mutedForeground }]}>
+              Analysing skill gaps and market signals…
+            </Text>
+          </View>
+        )}
 
-          return (
-            <View key={lv} style={styles.levelSection}>
-              {/* Level header */}
-              <View style={[styles.levelHeader, { backgroundColor: LEVEL_COLORS[lv] + "15", borderColor: LEVEL_COLORS[lv] + "40" }]}>
-                <Text style={styles.levelHeaderIcon}>{LEVEL_ICONS[lv]}</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.levelHeaderTitle, { color: LEVEL_COLORS[lv] }]}>{lv} Level</Text>
-                  <Text style={[styles.levelHeaderSub, { color: colors.mutedForeground }]}>{mods.length} weeks · {lvCompleted}/{mods.length} done</Text>
+        {hasRoadmap && !isGenerating && (
+          <>
+            {/* Macro progress */}
+            <MacroProgressHeader
+              macroProgress={macroProgress}
+              completedWeeks={completedWeeks}
+              totalWeeks={totalWeeks}
+              targetRole={targetRole}
+              careerTrackSkillCount={careerTrackSkills.length}
+              lastRegeneratedAt={lastRegeneratedAt}
+              reducedMotion={reducedMotion}
+              highContrast={highContrast}
+            />
+
+            {/* Risk banners */}
+            {jobDeadlines.length > 0 && (
+              <View>
+                {jobDeadlines.map((dl) => (
+                  <RiskBanner
+                    key={dl.jobId}
+                    deadline={dl}
+                    onApplyStrategy={(sid: EmergencyStrategy["id"]) => applyEmergencyStrategy(dl.jobId, sid)}
+                    onDismiss={() => dismissExpiredJob(dl.jobId)}
+                  />
+                ))}
+              </View>
+            )}
+
+            {/* ── Timeline tab ── */}
+            {activeTab === "list" && (
+              <Animated.View style={{ opacity: fadeTrans }}>
+                {/* Track summary */}
+                <View style={styles.trackRow}>
+                  <View style={[styles.trackPill, { backgroundColor: "#6366f1" + "18" }]}>
+                    <Text style={[styles.trackPillText, { color: "#6366f1" }]}>
+                      🎯 Job Track · {weeks.filter((w) => w.track === "job").length} weeks
+                    </Text>
+                  </View>
+                  <View style={[styles.trackPill, { backgroundColor: "#0891b2" + "18" }]}>
+                    <Text style={[styles.trackPillText, { color: "#0891b2" }]}>
+                      🚀 Career Track · {weeks.filter((w) => w.track === "career").length} weeks
+                    </Text>
+                  </View>
                 </View>
-                <View style={[styles.lvBadge, { backgroundColor: LEVEL_COLORS[lv] }]}>
-                  <Text style={styles.lvBadgeText}>{lvPct}%</Text>
-                </View>
-                {!unlocked && (
-                  <View style={[styles.lockBadge, { backgroundColor: colors.muted }]}>
-                    <Lock size={12} color={colors.mutedForeground} />
-                    <Text style={[styles.lockText, { color: colors.mutedForeground }]}>Complete 50% of {LEVELS[LEVELS.indexOf(lv) - 1] ?? "previous"} level to unlock</Text>
+
+                {weeks.map((week, idx) => (
+                  <WeekCard
+                    key={week.id}
+                    week={week}
+                    onComplete={() => handleWeekComplete(week.id)}
+                    onToggleSkill={(skillId) => toggleSkillStatus(week.id, skillId)}
+                    reducedMotion={reducedMotion}
+                    highContrast={highContrast}
+                    isNew={idx === weeks.length - 1 && idx > 5}
+                  />
+                ))}
+
+                {/* Career track skills earned */}
+                {careerTrackSkills.length > 0 && (
+                  <View style={[styles.careerSection, { backgroundColor: colors.card, borderColor: "#0891b2" }]}>
+                    <Text style={[styles.careerTitle, { color: colors.foreground }]}>
+                      🚀 Career Track Skills Earned
+                    </Text>
+                    <Text style={[styles.careerSub, { color: colors.mutedForeground }]}>
+                      These skills are yours permanently — regardless of any specific job.
+                    </Text>
+                    <View style={styles.careerChips}>
+                      {careerTrackSkills.map((skill) => (
+                        <View
+                          key={skill.id}
+                          style={[styles.careerChip, { backgroundColor: "#0891b2" + "18", borderColor: "#0891b2" + "40" }]}
+                          accessible
+                          accessibilityLabel={`${skill.name}: ${skill.status}`}
+                        >
+                          <Text style={[styles.careerChipText, { color: "#0891b2" }]}>{skill.name}</Text>
+                        </View>
+                      ))}
+                    </View>
                   </View>
                 )}
-              </View>
+              </Animated.View>
+            )}
 
-              {mods.map((mod) => (
-                <ModuleCard
-                  key={mod.id}
-                  module={mod}
-                  locked={!unlocked}
-                  onToggle={() => { toggleModule(mod.id); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+            {/* ── Calendar tab ── */}
+            {activeTab === "calendar" && (
+              <Animated.View style={{ opacity: fadeTrans }}>
+                <CalendarView
+                  weeks={weeks}
+                  selectedWeekId={selectedWeekId}
+                  onSelectWeek={(id) => {
+                    setSelectedWeekId(selectedWeekId === id ? null : id);
+                    // Jump to timeline for details
+                    if (selectedWeekId !== id) switchTab("list");
+                  }}
+                  reducedMotion={reducedMotion}
+                  highContrast={highContrast}
                 />
-              ))}
-            </View>
-          );
-        })}
+                {selectedWeek && activeTab === "calendar" && (
+                  <View style={[styles.calDetail, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <Text style={[styles.calDetailTitle, { color: colors.foreground }]}>{selectedWeek.topic}</Text>
+                    <Text style={[styles.calDetailSub, { color: colors.mutedForeground }]}>
+                      Week {selectedWeek.weekNumber} · {selectedWeek.level} · Tap to jump to Timeline
+                    </Text>
+                  </View>
+                )}
+              </Animated.View>
+            )}
+
+            {/* ── Skill graph tab ── */}
+            {activeTab === "graph" && (
+              <Animated.View style={{ opacity: fadeTrans }}>
+                <SkillDependencyGraph
+                  weeks={weeks}
+                  onToggleSkill={(weekId, skillId) => toggleSkillStatus(weekId, skillId)}
+                  highContrast={highContrast}
+                />
+              </Animated.View>
+            )}
+
+            {/* ── Settings tab ── */}
+            {activeTab === "settings" && (
+              <Animated.View style={{ opacity: fadeTrans }}>
+                <AccessibilityControls
+                  reducedMotion={reducedMotion}
+                  highContrast={highContrast}
+                  onToggleReducedMotion={setReducedMotion}
+                  onToggleHighContrast={setHighContrast}
+                />
+
+                <View style={[styles.actionsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                  <Text style={[styles.actionsTitle, { color: colors.foreground }]}>Roadmap Actions</Text>
+
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { borderColor: colors.primary + "40", backgroundColor: colors.primary + "10" }]}
+                    onPress={handleGenerate}
+                    disabled={isGenerating}
+                    accessibilityRole="button"
+                    accessibilityLabel="Regenerate roadmap"
+                  >
+                    <RefreshCw size={18} color={colors.primary} />
+                    <Text style={[styles.actionBtnText, { color: colors.primary }]}>Regenerate Roadmap</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { borderColor: colors.destructive + "40", backgroundColor: colors.destructive + "10" }]}
+                    onPress={() => {
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+                      clearRoadmap();
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear all roadmap data"
+                  >
+                    <Trash2 size={18} color={colors.destructive} />
+                    <Text style={[styles.actionBtnText, { color: colors.destructive }]}>Clear Roadmap</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={[styles.philosophyCard, { backgroundColor: colors.accent, borderColor: colors.accentForeground + "20" }]}>
+                  <Text style={[styles.philosophyTitle, { color: colors.accentForeground }]}>📖 UX Philosophy</Text>
+                  <Text style={[styles.philosophyText, { color: colors.accentForeground }]}>
+                    This roadmap is a living, breathing guide that adapts to you — not a rigid schedule.
+                    {"\n\n"}Your skills are valuable regardless of any specific job. Every update is framed to empower, never to stress.
+                  </Text>
+                </View>
+              </Animated.View>
+            )}
+          </>
+        )}
       </ScrollView>
+
+      {/* Celebration overlay */}
+      <CelebrationOverlay
+        visible={celebration.visible}
+        type={celebration.type}
+        title={celebration.title}
+        subtitle={celebration.subtitle}
+        onDismiss={() => setCelebration((c) => ({ ...c, visible: false }))}
+        reducedMotion={reducedMotion}
+      />
     </View>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth, marginBottom: 0, position: "relative", overflow: "hidden" },
-  headerGradient: { ...StyleSheet.absoluteFillObject },
-  headerBlob: { position: "absolute", borderRadius: 999 },
-  headerBlobOne: { width: 140, height: 140, right: -30, top: 10 },
-  headerBlobTwo: { width: 96, height: 96, left: -20, top: 54 },
-  headerTitle: { fontSize: 24, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
-  headerSub: { fontSize: 14, fontFamily: "Inter_500Medium", marginTop: 3 },
-  refreshBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
-  emptyContainer: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
-  emptyIcon: { width: 96, height: 96, borderRadius: 32, alignItems: "center", justifyContent: "center", marginBottom: 24 },
-  emptyTitle: { fontFamily: "Inter_700Bold", fontSize: 24, marginBottom: 12, letterSpacing: -0.5, textAlign: "center" },
-  emptySub: { fontFamily: "Inter_500Medium", fontSize: 16, textAlign: "center", lineHeight: 24, marginBottom: 24 },
-  levelPreview: { flexDirection: "row", alignItems: "center", borderRadius: 16, borderWidth: 1, paddingHorizontal: 20, paddingVertical: 14, marginBottom: 32 },
-  levelPreviewItem: { flexDirection: "row", alignItems: "center", gap: 4 },
-  levelPreviewIcon: { fontSize: 16 },
-  levelPreviewLabel: { fontFamily: "Inter_700Bold", fontSize: 13 },
-  generateBtn: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 18, paddingHorizontal: 32, borderRadius: 20 },
+  root: { flex: 1 },
+
+  screenHeader: { borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 20, paddingBottom: 0 },
+  headerTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingBottom: 10 },
+  screenTitle: { fontFamily: "Inter_700Bold", fontSize: 28, letterSpacing: -0.8 },
+  screenSub: { fontFamily: "Inter_500Medium", fontSize: 13, marginTop: 1 },
+  headerActions: { flexDirection: "row", gap: 8 },
+  iconBtn: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+
+  tabsRow: { flexDirection: "row", paddingBottom: 0 },
+  tab: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: "transparent", marginRight: 4 },
+  tabLabel: { fontFamily: "Inter_600SemiBold", fontSize: 13 },
+
+  body: { padding: 16 },
+
+  emptyWrap: { alignItems: "center", paddingTop: 36, paddingHorizontal: 20 },
+  emptyEmoji: { fontSize: 70, marginBottom: 18 },
+  emptyTitle: { fontFamily: "Inter_700Bold", fontSize: 26, textAlign: "center", letterSpacing: -0.6, marginBottom: 10 },
+  emptySub: { fontFamily: "Inter_500Medium", fontSize: 15, textAlign: "center", lineHeight: 23, marginBottom: 20 },
+  levelPreview: { flexDirection: "row", alignItems: "center", borderRadius: 14, borderWidth: 1, paddingHorizontal: 18, paddingVertical: 12, marginBottom: 18, gap: 14 },
+  levelLabel: { fontFamily: "Inter_700Bold", fontSize: 13 },
+  featureRow: { alignSelf: "stretch", paddingLeft: 8, marginBottom: 7 },
+  featureText: { fontFamily: "Inter_500Medium", fontSize: 14, lineHeight: 21 },
+  generateBtn: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 18, paddingHorizontal: 36, borderRadius: 20, marginTop: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 6 },
   generateBtnText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 17 },
-  progressCard: { borderRadius: 20, padding: 20, borderWidth: 1, marginBottom: 24, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.05, shadowRadius: 12, elevation: 2 },
-  progressRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  progressTitle: { fontFamily: "Inter_700Bold", fontSize: 16 },
-  progressPct: { fontFamily: "Inter_700Bold", fontSize: 24, letterSpacing: -0.5 },
-  progressBar: { height: 8, borderRadius: 4, overflow: "hidden", marginBottom: 10 },
-  progressFill: { height: "100%", borderRadius: 4 },
-  progressSub: { fontFamily: "Inter_500Medium", fontSize: 13 },
-  levelSection: { marginBottom: 24 },
-  levelHeader: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 12, flexWrap: "wrap" },
-  levelHeaderIcon: { fontSize: 24 },
-  levelHeaderTitle: { fontFamily: "Inter_700Bold", fontSize: 16 },
-  levelHeaderSub: { fontFamily: "Inter_500Medium", fontSize: 12, marginTop: 2 },
-  lvBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  lvBadgeText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 12 },
-  lockBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, width: "100%", marginTop: 6 },
-  lockText: { fontSize: 11, fontFamily: "Inter_500Medium" },
-  moduleCard: { borderRadius: 20, padding: 20, borderWidth: 1, marginBottom: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.04, shadowRadius: 10, elevation: 1 },
-  moduleHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
-  moduleHeaderLeft: { flex: 1, flexDirection: "row", gap: 12, alignItems: "flex-start" },
-  moduleHeaderRight: { flexDirection: "row", alignItems: "center", gap: 8 },
-  weekBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, alignSelf: "flex-start", marginTop: 2 },
-  weekText: { fontFamily: "Inter_700Bold", fontSize: 12 },
-  moduleTopic: { fontFamily: "Inter_700Bold", fontSize: 16, marginBottom: 6, letterSpacing: -0.2 },
-  levelBadge: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, alignSelf: "flex-start" },
-  levelDot: { width: 6, height: 6, borderRadius: 3 },
-  levelText: { fontSize: 11, fontFamily: "Inter_700Bold" },
-  checkBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, alignItems: "center", justifyContent: "center" },
-  moduleBody: { marginTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(0,0,0,0.06)", paddingTop: 16 },
-  moduleDesc: { fontFamily: "Inter_500Medium", fontSize: 14, lineHeight: 22, marginBottom: 16 },
-  subSection: { fontFamily: "Inter_700Bold", fontSize: 13, marginBottom: 10 },
-  taskRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 8 },
-  taskDot: { width: 7, height: 7, borderRadius: 3.5, marginTop: 7 },
-  taskText: { flex: 1, fontFamily: "Inter_500Medium", fontSize: 14, lineHeight: 21 },
-  resourceRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 12, borderWidth: 1, marginBottom: 8 },
-  resourceIcon: { width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center" },
-  resourceTitle: { flex: 1, fontFamily: "Inter_600SemiBold", fontSize: 13, lineHeight: 19 },
+
+  generatingWrap: { alignItems: "center", paddingVertical: 60, gap: 14 },
+  genTitle: { fontFamily: "Inter_700Bold", fontSize: 18, textAlign: "center" },
+  genSub: { fontFamily: "Inter_500Medium", fontSize: 14, textAlign: "center" },
+
+  trackRow: { flexDirection: "row", gap: 10, marginBottom: 14, flexWrap: "wrap" },
+  trackPill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  trackPillText: { fontFamily: "Inter_600SemiBold", fontSize: 12 },
+
+  careerSection: { borderRadius: 20, borderWidth: 1.5, padding: 16, marginTop: 8 },
+  careerTitle: { fontFamily: "Inter_700Bold", fontSize: 16, marginBottom: 4 },
+  careerSub: { fontFamily: "Inter_500Medium", fontSize: 13, lineHeight: 19, marginBottom: 12 },
+  careerChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  careerChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, borderWidth: 1 },
+  careerChipText: { fontFamily: "Inter_600SemiBold", fontSize: 12 },
+
+  calDetail: { borderRadius: 16, borderWidth: 1, padding: 14, marginTop: 8 },
+  calDetailTitle: { fontFamily: "Inter_700Bold", fontSize: 15, marginBottom: 4 },
+  calDetailSub: { fontFamily: "Inter_500Medium", fontSize: 12 },
+
+  actionsCard: { borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 12, gap: 10 },
+  actionsTitle: { fontFamily: "Inter_700Bold", fontSize: 14, marginBottom: 4 },
+  actionBtn: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1 },
+  actionBtnText: { fontFamily: "Inter_600SemiBold", fontSize: 14 },
+
+  philosophyCard: { borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 12 },
+  philosophyTitle: { fontFamily: "Inter_700Bold", fontSize: 15, marginBottom: 8 },
+  philosophyText: { fontFamily: "Inter_500Medium", fontSize: 14, lineHeight: 21 },
 });

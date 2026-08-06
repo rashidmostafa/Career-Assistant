@@ -1,9 +1,19 @@
-import { BriefcaseBusiness, AlertCircle, CheckCircle, AlertTriangle, Eye, EyeOff, Mail, Lock } from "lucide-react-native";
+/**
+ * auth.tsx — Full authentication screen.
+ * Modes: login | register | verify-otp | security-questions | 2fa-choice
+ * Features: email/OTP verify, password strength, social placeholders,
+ *           biometric login, security questions, consent, risk display.
+ */
+import {
+  AlertCircle, ArrowLeft, CheckCircle, Eye, EyeOff,
+  Fingerprint, Lock, Mail, Phone, User as UserIcon, Shield,
+} from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -17,20 +27,21 @@ import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { OtpInput } from "@/components/auth/OtpInput";
+import { PasswordStrengthBar } from "@/components/auth/PasswordStrengthBar";
+import { BiometricButton } from "@/components/auth/BiometricButton";
+import { SecurityQuestionsForm } from "@/components/auth/SecurityQuestionsForm";
+import { OtpService } from "@/services/otpService";
+import { SocialAuthService } from "@/services/socialAuthService";
+import { useBiometric } from "@/hooks/useBiometric";
 
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-
 const COMMON_TYPOS: Record<string, string> = {
-  "gmail.con": "gmail.com",
-  "gmail.cmo": "gmail.com",
-  "gmal.com": "gmail.com",
-  "gmial.com": "gmail.com",
-  "gamil.com": "gmail.com",
-  "gmail.co": "gmail.com",
-  "yahooo.com": "yahoo.com",
-  "yhoo.com": "yahoo.com",
-  "hotmial.com": "hotmail.com",
-  "hotmali.com": "hotmail.com",
+  "gmail.con": "gmail.com", "gmail.cmo": "gmail.com", "gmal.com": "gmail.com",
+  "gmial.com": "gmail.com", "gamil.com": "gmail.com", "gmail.co": "gmail.com",
+  "yahooo.com": "yahoo.com", "yhoo.com": "yahoo.com",
+  "hotmial.com": "hotmail.com", "hotmali.com": "hotmail.com",
   "outlok.com": "outlook.com",
 };
 
@@ -41,616 +52,610 @@ function detectEmailTypo(email: string): string | null {
   return fix ? `${email.split("@")[0]}@${fix}` : null;
 }
 
-function getEmailState(email: string) {
-  if (!email) return { valid: false, hint: null, typoSuggestion: null };
-  const typoSuggestion = detectEmailTypo(email);
-  if (!EMAIL_REGEX.test(email)) {
-    return {
-      valid: false,
-      hint: "Please enter a valid email (e.g., name@domain.com)",
-      typoSuggestion: null,
-    };
-  }
-  return { valid: true, hint: null, typoSuggestion };
-}
-
-function getPasswordState(password: string) {
-  const hasMinLength = password.length >= 8;
-  const hasUppercase = /[A-Z]/.test(password);
-  const hasLowercase = /[a-z]/.test(password);
-  const hasNumber = /\d/.test(password);
-  const hasSpecialChar = /[^A-Za-z0-9]/.test(password);
-  const hasNoSpaces = !/\s/.test(password);
-
+function getPasswordRules(password: string) {
   return {
-    valid: hasMinLength && hasUppercase && hasLowercase && hasNumber && hasSpecialChar && hasNoSpaces,
-    rules: {
-      hasMinLength,
-      hasUppercase,
-      hasLowercase,
-      hasNumber,
-      hasSpecialChar,
-      hasNoSpaces,
-    },
+    hasMinLength:   password.length >= 8,
+    hasUppercase:   /[A-Z]/.test(password),
+    hasLowercase:   /[a-z]/.test(password),
+    hasNumber:      /\d/.test(password),
+    hasSpecialChar: /[^A-Za-z0-9]/.test(password),
+    hasNoSpaces:    !/\s/.test(password),
   };
 }
 
-type Mode = "login" | "register";
+type Mode = "login" | "register" | "verify-otp" | "security-questions";
 
+// ─── Screen ───────────────────────────────────────────────────────────────────
 export default function AuthScreen() {
-  const colors = useColors() as any;
-  const insets = useSafeAreaInsets();
-  const router = useRouter();
-  const { signIn, signUp, pendingVerificationEmail, confirmEmailVerified, resendVerification } = useAuth();
-  const topPad = Platform.OS === "web" ? 67 : insets.top;
+  const router   = useRouter();
+  const colors   = useColors() as any;
+  const insets   = useSafeAreaInsets();
+  const {
+    signIn, signUp, confirmEmailVerified, resendVerification,
+    pendingVerificationEmail, pendingUserId, biometricAvailable,
+    biometricType, loginWithBiometric, setSecurityQuestions,
+  } = useAuth();
+
+  // Biometric hook — drives real enrol/login/auto-prompt
+  const biometric = useBiometric();
 
   const [mode, setMode] = useState<Mode>("login");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [emailTouched, setEmailTouched] = useState(false);
-  const [passwordTouched, setPasswordTouched] = useState(false);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [resentSuccess, setResentSuccess] = useState(false);
+  const [confirmPw, setConfirmPw] = useState("");
+  const [name, setName]         = useState("");
+  const [phone, setPhone]       = useState("");
+  const [showPw, setShowPw]     = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState<string | null>(null);
+  const [otpError, setOtpError] = useState(false);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [consentGiven, setConsentGiven] = useState(false);
 
-  const emailState = getEmailState(email);
-  const passwordState = getPasswordState(password);
+  const pwRules = getPasswordRules(password);
+  const pwValid = Object.values(pwRules).every(Boolean);
 
-  const showEmailError = emailTouched && !emailState.valid && email.length > 0;
-  const showEmailSuccess = emailTouched && emailState.valid;
-  const emailBorderColor = showEmailError ? colors.destructive : showEmailSuccess ? colors.success : colors.border;
+  // ── Switch modes ─────────────────────────────────────────────────────────────
+  const goLogin    = () => { setMode("login");    setError(null); };
+  const goRegister = () => { setMode("register"); setError(null); };
 
-  const showPasswordError = passwordTouched && mode === "register" && password.length > 0 && !passwordState.valid;
-  const showPasswordSuccess = passwordTouched && mode === "register" && passwordState.valid;
-  const passwordBorderColor = showPasswordError
-    ? colors.destructive
-    : showPasswordSuccess
-      ? colors.success
-      : colors.border;
-
-  if (pendingVerificationEmail) {
-    return (
-      <KeyboardAvoidingView
-        style={[styles.flex, { backgroundColor: colors.background }]}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-      >
-        <ScrollView
-          contentContainerStyle={[
-            styles.scroll,
-            { paddingTop: topPad + 60, paddingBottom: insets.bottom + 40 },
-          ]}
-          keyboardShouldPersistTaps="handled"
-        >
-          <Animated.View entering={FadeInDown.duration(600).springify()} style={styles.header}>
-            <View style={[styles.logoWrap, { backgroundColor: colors.primary }]}>
-              <Mail size={32} color="#fff" strokeWidth={2} />
-            </View>
-            <Text style={[styles.appName, { color: colors.foreground }]}>Check Your Email</Text>
-            <Text style={[styles.tagline, { color: colors.mutedForeground, textAlign: "center" }]}>
-              We sent a verification link to{"\n"}
-              <Text style={{ fontFamily: "Inter_700Bold", color: colors.foreground }}>
-                {pendingVerificationEmail}
-              </Text>
-            </Text>
-          </Animated.View>
-
-          <Animated.View
-            entering={FadeInUp.duration(800).springify()}
-            style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-          >
-            <Text style={[styles.verifyDesc, { color: colors.mutedForeground }]}>
-              Please verify your email before continuing. Click the link in the email we sent you.
-            </Text>
-
-            <View style={[styles.verifyBox, { backgroundColor: colors.accent, borderColor: colors.primary + "30" }]}>
-              <CheckCircle size={20} color={colors.primary} />
-              <Text style={[styles.verifyBoxText, { color: colors.primary }]}>
-                Once verified, tap the button below to continue.
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.btn, { backgroundColor: colors.primary, marginTop: 24 }]}
-              onPress={async () => {
-                await confirmEmailVerified();
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              }}
-            >
-              <Text style={styles.btnText}>I've Verified My Email</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.resendBtn}
-              onPress={async () => {
-                await resendVerification();
-                setResentSuccess(true);
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setTimeout(() => setResentSuccess(false), 3000);
-              }}
-            >
-              <Text style={[styles.resendText, { color: resentSuccess ? colors.success : colors.primary }]}>
-                {resentSuccess ? "✓ Verification email resent!" : "Resend verification email"}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.resendBtn}
-              onPress={() => {
-                setMode("login");
-              }}
-            >
-              <Text style={[styles.resendText, { color: colors.mutedForeground }]}>Back to Sign In</Text>
-            </TouchableOpacity>
-          </Animated.View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    );
-  }
-
-  const handleSubmit = async () => {
-    setError("");
-
-    if (!email || !password) {
-      setError("Please fill in all fields.");
-      return;
-    }
-
-    if (!emailState.valid) {
-      setError("Please enter a valid email address.");
-      return;
-    }
-
-    if (mode === "register" && !name.trim()) {
-      setError("Please enter your full name.");
-      return;
-    }
-
-    if (mode === "register" && !passwordState.valid) {
-      setError("Password must be 8+ characters and include uppercase, lowercase, number, special character, and no spaces.");
-      return;
-    }
-
-    if (mode === "login" && password.length < 6) {
-      setError("Password must be at least 6 characters.");
-      return;
-    }
-
+  // ── Login ────────────────────────────────────────────────────────────────────
+  const handleLogin = useCallback(async () => {
+    setError(null);
+    if (!EMAIL_REGEX.test(email)) { setError("Please enter a valid email."); return; }
+    if (password.length < 6)     { setError("Password must be at least 6 characters."); return; }
     setLoading(true);
     try {
-      if (mode === "login") {
-        await signIn(email, password);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        router.replace("/(tabs)");
+      const result = await signIn(email.trim().toLowerCase(), password);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      if (result.require2FA) {
+        router.push({ pathname: "/auth-2fa", params: { userId: result.userId ?? "" } });
       } else {
-        await signUp({ name: name.trim(), email, password });
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        router.replace("/(tabs)");
       }
     } catch (e: any) {
-      setError(e.message || "Something went wrong.");
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setError(e.message);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
     } finally {
       setLoading(false);
     }
-  };
+  }, [email, password, signIn, router]);
 
-  const SocialButton = ({
-    icon,
-    label,
-    onPress,
-  }: {
-    icon: string;
-    label: string;
-    onPress: () => void;
-  }) => (
-    <TouchableOpacity
-      style={[styles.socialBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-      onPress={onPress}
-      activeOpacity={0.7}
-    >
-      <Text style={styles.socialBtnIcon}>{icon}</Text>
-      <Text style={[styles.socialBtnText, { color: colors.foreground }]}>{label}</Text>
-    </TouchableOpacity>
-  );
+  // ── Biometric auto-prompt on login screen mount ───────────────────────────────
+  React.useEffect(() => {
+    if (mode !== "login") return;
+    biometric.autoPromptOnMount(async (result) => {
+      // Save tokens + navigate — result.user is available if needed
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      router.replace("/(tabs)");
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
+  // ── Biometric login ──────────────────────────────────────────────────────────
+  const handleBiometricLogin = useCallback(async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      // Try the hook-based biometric login first (full server round-trip)
+      const result = await biometric.login();
+      if (result) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        router.replace("/(tabs)");
+        return;
+      }
+      // Fall back to legacy AuthContext biometric (local simulation)
+      const ok = await loginWithBiometric();
+      if (ok) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        router.replace("/(tabs)");
+      } else {
+        setError(biometric.error ?? "Biometric authentication failed. Please sign in with your password.");
+      }
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [biometric, loginWithBiometric, router]);
+
+  // ── Register ─────────────────────────────────────────────────────────────────
+  const handleRegister = useCallback(async () => {
+    setError(null);
+    if (!name.trim())            { setError("Please enter your name."); return; }
+    if (!EMAIL_REGEX.test(email)) { setError("Please enter a valid email."); return; }
+    if (!pwValid)                { setError("Password does not meet all requirements."); return; }
+    if (password !== confirmPw)  { setError("Passwords do not match."); return; }
+    if (!consentGiven)           { setError("Please accept the privacy policy to continue."); return; }
+    setLoading(true);
+    try {
+      await signUp({ name: name.trim(), email: email.trim().toLowerCase(), password, phone: phone.trim() || undefined });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      setMode("verify-otp");
+    } catch (e: any) {
+      setError(e.message);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+    } finally {
+      setLoading(false);
+    }
+  }, [name, email, password, confirmPw, phone, pwValid, consentGiven, signUp]);
+
+  // ── OTP verify ───────────────────────────────────────────────────────────────
+  const handleOtpComplete = useCallback(async (code: string) => {
+    setOtpError(false);
+    setLoading(true);
+    try {
+      const userId = pendingUserId ?? pendingId;
+      if (!userId) throw new Error("Session expired. Please register again.");
+      const result = await OtpService.verifyOtp(`email_verify_${userId}`, code);
+      if (!result.valid) {
+        setOtpError(true);
+        setError(result.error ?? "Invalid code.");
+        return;
+      }
+      await confirmEmailVerified();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      // Prompt to set security questions
+      setMode("security-questions");
+    } catch (e: any) {
+      setError(e.message);
+      setOtpError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [pendingUserId, pendingId, confirmEmailVerified]);
+
+  const handleResendOtp = useCallback(async () => {
+    if (resendCooldown > 0) return;
+    await resendVerification();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setResendCooldown(60);
+    const interval = setInterval(() => {
+      setResendCooldown((c) => { if (c <= 1) { clearInterval(interval); return 0; } return c - 1; });
+    }, 1000);
+  }, [resendCooldown, resendVerification]);
+
+  // ── Security questions ────────────────────────────────────────────────────────
+  const handleSecurityQuestions = useCallback(async (qs: Array<{ question: string; answer: string }>) => {
+    setLoading(true);
+    try {
+      await setSecurityQuestions(qs);
+      router.replace("/onboarding");
+    } catch {
+      router.replace("/onboarding");
+    } finally {
+      setLoading(false);
+    }
+  }, [setSecurityQuestions, router]);
+
+  // ── Typo hint ─────────────────────────────────────────────────────────────────
+  const typoHint = EMAIL_REGEX.test(email) ? detectEmailTypo(email) : null;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <KeyboardAvoidingView
-      style={[styles.flex, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      style={[styles.root, { backgroundColor: colors.background }]}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
-        contentContainerStyle={[
-          styles.scroll,
-          { paddingTop: topPad + 60, paddingBottom: insets.bottom + 40 },
-        ]}
+        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 40 }]}
+        showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Animated.View entering={FadeInDown.duration(600).springify()} style={styles.header}>
-          <View style={[styles.logoWrap, { backgroundColor: colors.primary }]}>
-            <BriefcaseBusiness size={32} color="#fff" strokeWidth={2.5} />
+        {/* Back button (register → login) */}
+        {(mode === "register" || mode === "verify-otp" || mode === "security-questions") && (
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={mode === "register" ? goLogin : mode === "verify-otp" ? goRegister : goLogin}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <ArrowLeft size={22} color={colors.foreground} />
+          </TouchableOpacity>
+        )}
+
+        {/* Logo / brand */}
+        <Animated.View entering={FadeInDown.duration(400)} style={styles.brand}>
+          <View style={[styles.logoCircle, { backgroundColor: colors.primary + "18" }]}>
+            <Shield size={36} color={colors.primary} />
           </View>
-          <Text style={[styles.appName, { color: colors.foreground }]}>CareerAI</Text>
-          <Text style={[styles.tagline, { color: colors.mutedForeground }]}>
-            Your intelligent career assistant
-          </Text>
+          <Text style={[styles.appName, { color: colors.foreground }]}>Career Assistant</Text>
         </Animated.View>
 
-        <Animated.View
-          entering={FadeInUp.duration(800).springify()}
-          style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-        >
-          <View style={[styles.tabRow, { backgroundColor: colors.muted }]}>
-            {(["login", "register"] as const).map((m) => (
-              <TouchableOpacity
-                key={m}
-                style={[styles.tab, m === mode && { backgroundColor: colors.card }]}
-                onPress={() => {
-                  setMode(m);
-                  setError("");
-                  setEmailTouched(false);
-                  setPasswordTouched(false);
-                }}
-              >
-                <Text
-                  style={[
-                    styles.tabText,
-                    { color: m === mode ? colors.foreground : colors.mutedForeground },
-                  ]}
-                >
-                  {m === "login" ? "Sign In" : "Sign Up"}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+        {/* ── LOGIN ── */}
+        {mode === "login" && (
+          <Animated.View entering={FadeInDown.duration(350).delay(80)}>
+            <Text style={[styles.title, { color: colors.foreground }]}>Welcome back</Text>
+            <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Sign in to continue your journey</Text>
 
-          {mode === "register" && (
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.label, { color: colors.mutedForeground }]}>Full Name</Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  { backgroundColor: colors.background, color: colors.foreground, borderColor: colors.border },
-                ]}
-                placeholder="John Doe"
-                placeholderTextColor={colors.mutedForeground}
-                value={name}
-                onChangeText={setName}
-                autoCapitalize="words"
-              />
-            </View>
-          )}
-
-          <View style={styles.fieldGroup}>
-            <Text style={[styles.label, { color: colors.mutedForeground }]}>Email</Text>
-            <View style={[styles.inputRow, { backgroundColor: colors.background, borderColor: emailBorderColor }]}>
-              <Mail size={16} color={colors.mutedForeground} />
-              <TextInput
-                style={[styles.inputInner, { color: colors.foreground }]}
-                placeholder="you@example.com"
-                placeholderTextColor={colors.mutedForeground}
-                value={email}
-                onChangeText={(t) => {
-                  setEmail(t);
-                  setEmailTouched(false);
-                }}
-                onBlur={() => setEmailTouched(true)}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              {showEmailSuccess && <CheckCircle size={18} color={colors.success} />}
-              {showEmailError && <AlertCircle size={18} color={colors.destructive} />}
-            </View>
-            {showEmailError && (
-              <Text style={[styles.fieldHint, { color: colors.destructive }]}>{emailState.hint}</Text>
-            )}
-            {emailState.typoSuggestion && emailState.valid && (
-              <TouchableOpacity
-                style={[
-                  styles.typoHint,
-                  { backgroundColor: colors.warning + "15", borderColor: colors.warning + "40" },
-                ]}
-                onPress={() => setEmail(emailState.typoSuggestion!)}
-              >
-                <AlertTriangle size={14} color={colors.warning} />
-                <Text style={[styles.typoText, { color: colors.warning }]}>
-                  Did you mean <Text style={{ fontFamily: "Inter_700Bold" }}>{emailState.typoSuggestion}</Text>? Tap to fix
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <Text style={[styles.label, { color: colors.mutedForeground }]}>Password</Text>
-            <View style={[styles.inputRow, { backgroundColor: colors.background, borderColor: passwordBorderColor }]}>
-              <Lock size={16} color={colors.mutedForeground} />
-              <TextInput
-                style={[styles.inputInner, { color: colors.foreground }]}
-                placeholder="••••••••"
-                placeholderTextColor={colors.mutedForeground}
-                value={password}
-                onChangeText={setPassword}
-                onBlur={() => setPasswordTouched(true)}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <TouchableOpacity
-                onPress={() => setShowPassword((v) => !v)}
-                accessibilityLabel={showPassword ? "Hide password" : "Show password"}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                {showPassword ? (
-                  <EyeOff size={18} color={colors.mutedForeground} />
-                ) : (
-                  <Eye size={18} color={colors.mutedForeground} />
-                )}
-              </TouchableOpacity>
-            </View>
-
-            {mode === "register" && (
-              <View style={styles.passwordRules}>
-                <PasswordRule ok={passwordState.rules.hasMinLength} text="At least 8 characters" colors={colors} />
-                <PasswordRule ok={passwordState.rules.hasUppercase} text="One uppercase letter" colors={colors} />
-                <PasswordRule ok={passwordState.rules.hasLowercase} text="One lowercase letter" colors={colors} />
-                <PasswordRule ok={passwordState.rules.hasNumber} text="One number" colors={colors} />
-                <PasswordRule ok={passwordState.rules.hasSpecialChar} text="One special character" colors={colors} />
-                <PasswordRule ok={passwordState.rules.hasNoSpaces} text="No spaces" colors={colors} />
+            {/* Biometric */}
+            {biometricAvailable && (
+              <View style={{ marginBottom: 16 }}>
+                <BiometricButton
+                  type={biometricType}
+                  onPress={handleBiometricLogin}
+                  loading={loading}
+                />
+                <Divider colors={colors} label="or sign in with email" />
               </View>
             )}
 
-            {mode === "register" && showPasswordError && (
-              <Text style={[styles.fieldHint, { color: colors.destructive }]}>
-                Password does not meet the required criteria.
-              </Text>
+            <Field
+              icon={<Mail size={18} color={colors.mutedForeground} />}
+              placeholder="Email address"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              colors={colors}
+              accessibilityLabel="Email address"
+            />
+            {typoHint && (
+              <TouchableOpacity onPress={() => setEmail(typoHint)} style={styles.typoHint}>
+                <Text style={[styles.typoText, { color: colors.primary }]}>
+                  Did you mean {typoHint}?
+                </Text>
+              </TouchableOpacity>
             )}
+            <PasswordField
+              value={password}
+              onChangeText={setPassword}
+              show={showPw}
+              onToggleShow={() => setShowPw((v) => !v)}
+              colors={colors}
+              placeholder="Password"
+            />
 
-            {mode === "login" && password.length > 0 && password.length < 6 && (
-              <Text style={[styles.fieldHint, { color: colors.destructive }]}>
-                Password must be at least 6 characters
-              </Text>
-            )}
-          </View>
+            {error && <ErrorBanner message={error} />}
 
-          {error ? (
-            <View
-              style={[
-                styles.errorBox,
-                { backgroundColor: colors.destructive + "12", borderColor: colors.destructive + "30" },
-              ]}
-            >
-              <AlertCircle size={16} color={colors.destructive} />
-              <Text style={[styles.errorText, { color: colors.destructive }]}>{error}</Text>
+            <PrimaryButton label="Sign In" onPress={handleLogin} loading={loading} color={colors.primary} />
+
+            {/* Social login placeholders */}
+            <Divider colors={colors} label="or continue with" />
+            <SocialRow colors={colors} />
+
+            <View style={styles.switchRow}>
+              <Text style={[styles.switchText, { color: colors.mutedForeground }]}>Don't have an account? </Text>
+              <TouchableOpacity onPress={goRegister} accessibilityRole="button">
+                <Text style={[styles.switchLink, { color: colors.primary }]}>Create one</Text>
+              </TouchableOpacity>
             </View>
-          ) : null}
+          </Animated.View>
+        )}
 
-          <TouchableOpacity
-            style={[styles.btn, { backgroundColor: colors.primary, opacity: loading ? 0.7 : 1 }]}
-            onPress={handleSubmit}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.btnText}>{mode === "login" ? "Sign In" : "Create Account"}</Text>
+        {/* ── REGISTER ── */}
+        {mode === "register" && (
+          <Animated.View entering={FadeInDown.duration(350)}>
+            <Text style={[styles.title, { color: colors.foreground }]}>Create account</Text>
+            <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Start your career journey today</Text>
+
+            <Field icon={<UserIcon size={18} color={colors.mutedForeground} />}
+              placeholder="Full name" value={name} onChangeText={setName}
+              colors={colors} accessibilityLabel="Full name" />
+
+            <Field icon={<Mail size={18} color={colors.mutedForeground} />}
+              placeholder="Email address" value={email} onChangeText={setEmail}
+              keyboardType="email-address" autoCapitalize="none"
+              colors={colors} accessibilityLabel="Email address" />
+            {typoHint && (
+              <TouchableOpacity onPress={() => setEmail(typoHint)} style={styles.typoHint}>
+                <Text style={[styles.typoText, { color: colors.primary }]}>Did you mean {typoHint}?</Text>
+              </TouchableOpacity>
             )}
-          </TouchableOpacity>
 
-          <View style={styles.dividerRow}>
-            <View style={[styles.divider, { backgroundColor: colors.border }]} />
-            <Text style={[styles.dividerText, { color: colors.mutedForeground }]}>or</Text>
-            <View style={[styles.divider, { backgroundColor: colors.border }]} />
-          </View>
+            <Field icon={<Phone size={18} color={colors.mutedForeground} />}
+              placeholder="Phone (optional)" value={phone} onChangeText={setPhone}
+              keyboardType="phone-pad"
+              colors={colors} accessibilityLabel="Phone number (optional)" />
 
-          <View style={styles.socialGroup}>
-            <SocialButton
-              icon="G"
-              label="Continue with Google"
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setError("Google login requires additional setup. Please use email/password for now.");
-              }}
-            />
-            <SocialButton
-              icon="f"
-              label="Continue with Facebook"
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setError("Facebook login requires additional setup. Please use email/password for now.");
-              }}
-            />
-            <SocialButton
-              icon="✉"
-              label="Continue with Email"
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setError("");
-              }}
-            />
-            <SocialButton
-              icon="···"
-              label="Continue with another way"
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setError("Additional sign-in options coming soon.");
-              }}
-            />
-          </View>
+            <PasswordField value={password} onChangeText={setPassword}
+              show={showPw} onToggleShow={() => setShowPw((v) => !v)}
+              colors={colors} placeholder="Password (8+ characters)" />
 
-          {mode === "login" && (
-            <Text style={[styles.switchText, { color: colors.mutedForeground }]}>
-              Don't have an account?{" "}
-              <Text
-                style={{ color: colors.primary, fontFamily: "Inter_700Bold" }}
-                onPress={() => {
-                  setMode("register");
-                  setError("");
-                }}
-              >
-                Sign Up
+            <PasswordStrengthBar password={password} rules={pwRules} />
+
+            <PasswordField value={confirmPw} onChangeText={setConfirmPw}
+              show={showConfirmPw} onToggleShow={() => setShowConfirmPw((v) => !v)}
+              colors={colors} placeholder="Confirm password" />
+
+            {confirmPw.length > 0 && confirmPw !== password && (
+              <Text style={[styles.mismatch, { color: "#ef4444" }]}>Passwords do not match.</Text>
+            )}
+
+            {/* Consent */}
+            <TouchableOpacity
+              style={styles.consentRow}
+              onPress={() => setConsentGiven((v) => !v)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: consentGiven }}
+            >
+              <View style={[styles.checkbox, { borderColor: consentGiven ? colors.primary : colors.border, backgroundColor: consentGiven ? colors.primary : "transparent" }]}>
+                {consentGiven && <Text style={{ color: "#fff", fontSize: 12, lineHeight: 16 }}>✓</Text>}
+              </View>
+              <Text style={[styles.consentText, { color: colors.mutedForeground }]}>
+                I agree to the{" "}
+                <Text style={{ color: colors.primary }}>Privacy Policy</Text>
+                {" "}and{" "}
+                <Text style={{ color: colors.primary }}>Terms of Service</Text>
+                {" "}(GDPR compliant)
+              </Text>
+            </TouchableOpacity>
+
+            {error && <ErrorBanner message={error} />}
+
+            <PrimaryButton label="Create Account" onPress={handleRegister} loading={loading} color={colors.primary}
+              disabled={!pwValid || !consentGiven} />
+
+            <View style={styles.switchRow}>
+              <Text style={[styles.switchText, { color: colors.mutedForeground }]}>Already have an account? </Text>
+              <TouchableOpacity onPress={goLogin} accessibilityRole="button">
+                <Text style={[styles.switchLink, { color: colors.primary }]}>Sign in</Text>
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        )}
+
+        {/* ── OTP VERIFY ── */}
+        {(mode === "verify-otp" || pendingVerificationEmail) && mode !== "security-questions" && (
+          <Animated.View entering={FadeInDown.duration(350)}>
+            <Text style={[styles.title, { color: colors.foreground }]}>Verify your email</Text>
+            <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
+              We sent a 6-digit code to{"\n"}
+              <Text style={{ color: colors.foreground, fontFamily: "Inter_700Bold" }}>
+                {pendingVerificationEmail ?? email}
               </Text>
             </Text>
-          )}
-          {mode === "register" && (
-            <Text style={[styles.switchText, { color: colors.mutedForeground }]}>
-              Already have an account?{" "}
-              <Text
-                style={{ color: colors.primary, fontFamily: "Inter_700Bold" }}
-                onPress={() => {
-                  setMode("login");
-                  setError("");
-                }}
+
+            <View style={styles.otpWrap}>
+              <OtpInput onComplete={handleOtpComplete} hasError={otpError} disabled={loading} />
+            </View>
+
+            {loading && <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} />}
+            {error && <ErrorBanner message={error} />}
+
+            <View style={styles.resendRow}>
+              <Text style={[styles.switchText, { color: colors.mutedForeground }]}>Didn't receive it? </Text>
+              <TouchableOpacity
+                onPress={handleResendOtp}
+                disabled={resendCooldown > 0}
+                accessibilityRole="button"
+                accessibilityLabel={resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend code"}
               >
-                Sign In
+                <Text style={[styles.switchLink, { color: resendCooldown > 0 ? colors.mutedForeground : colors.primary }]}>
+                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend code"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.infoCard, { backgroundColor: colors.accent, borderColor: colors.border }]}>
+              <Text style={[styles.infoText, { color: colors.accentForeground }]}>
+                🔒 Code expires in 10 minutes. Check your spam folder if you don't see it.
               </Text>
+            </View>
+          </Animated.View>
+        )}
+
+        {/* ── SECURITY QUESTIONS ── */}
+        {mode === "security-questions" && (
+          <Animated.View entering={FadeInDown.duration(350)}>
+            <Text style={[styles.title, { color: colors.foreground }]}>Security questions</Text>
+            <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
+              These help you recover your account and provide backup authentication.
             </Text>
-          )}
-        </Animated.View>
+            <SecurityQuestionsForm
+              onSubmit={handleSecurityQuestions}
+              loading={loading}
+              count={3}
+            />
+            <TouchableOpacity
+              style={styles.skipBtn}
+              onPress={() => router.replace("/onboarding")}
+              accessibilityRole="button"
+              accessibilityLabel="Skip security questions"
+            >
+              <Text style={[styles.skipText, { color: colors.mutedForeground }]}>Skip for now</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-function PasswordRule({
-  ok,
-  text,
-  colors,
-}: {
-  ok: boolean;
-  text: string;
-  colors: any;
-}) {
+// ─── Sub-components ────────────────────────────────────────────────────────────
+function Field({ icon, placeholder, value, onChangeText, keyboardType, autoCapitalize, colors, accessibilityLabel }: any) {
   return (
-    <View style={styles.passwordRuleRow}>
-      <CheckCircle size={14} color={ok ? colors.success : colors.mutedForeground} />
-      <Text style={[styles.passwordRuleText, { color: ok ? colors.success : colors.mutedForeground }]}>
-        {text}
-      </Text>
+    <View style={[fieldStyles.wrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      {icon}
+      <TextInput
+        style={[fieldStyles.input, { color: colors.foreground }]}
+        placeholder={placeholder}
+        placeholderTextColor={colors.mutedForeground}
+        value={value}
+        onChangeText={onChangeText}
+        keyboardType={keyboardType ?? "default"}
+        autoCapitalize={autoCapitalize ?? "words"}
+        accessibilityLabel={accessibilityLabel}
+      />
     </View>
   );
 }
 
+function PasswordField({ value, onChangeText, show, onToggleShow, colors, placeholder }: any) {
+  return (
+    <View style={[fieldStyles.wrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <Lock size={18} color={colors.mutedForeground} />
+      <TextInput
+        style={[fieldStyles.input, { color: colors.foreground }]}
+        placeholder={placeholder ?? "Password"}
+        placeholderTextColor={colors.mutedForeground}
+        value={value}
+        onChangeText={onChangeText}
+        secureTextEntry={!show}
+        autoCapitalize="none"
+        textContentType="password"
+        accessibilityLabel={placeholder ?? "Password"}
+      />
+      <TouchableOpacity onPress={onToggleShow} accessibilityRole="button" accessibilityLabel={show ? "Hide password" : "Show password"}>
+        {show ? <EyeOff size={18} color={colors.mutedForeground} /> : <Eye size={18} color={colors.mutedForeground} />}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function PrimaryButton({ label, onPress, loading, color, disabled }: any) {
+  return (
+    <TouchableOpacity
+      style={[styles.primaryBtn, { backgroundColor: color, opacity: disabled || loading ? 0.5 : 1 }]}
+      onPress={onPress}
+      disabled={disabled || loading}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ busy: loading, disabled }}
+    >
+      {loading
+        ? <ActivityIndicator color="#fff" />
+        : <Text style={styles.primaryBtnText}>{label}</Text>
+      }
+    </TouchableOpacity>
+  );
+}
+
+function ErrorBanner({ message }: { message: string }) {
+  return (
+    <View style={errStyles.wrap} accessibilityRole="alert" accessibilityLiveRegion="polite">
+      <AlertCircle size={16} color="#ef4444" />
+      <Text style={errStyles.text}>{message}</Text>
+    </View>
+  );
+}
+
+function Divider({ colors, label }: any) {
+  return (
+    <View style={styles.divider}>
+      <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+      <Text style={[styles.dividerLabel, { color: colors.mutedForeground }]}>{label}</Text>
+      <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+    </View>
+  );
+}
+
+function SocialRow({ colors }: any) {
+  const router = useRouter();
+  const [googleLoading,   setGoogleLoading]   = React.useState(false);
+  const [linkedinLoading, setLinkedinLoading] = React.useState(false);
+
+  const handleGoogle = async () => {
+    setGoogleLoading(true);
+    try {
+      await SocialAuthService.signInWithGoogle();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      router.replace("/(tabs)");
+    } catch (e: any) {
+      if (e?.message !== "Sign-in was cancelled.") {
+        Alert.alert("Google Sign-In Failed", e?.message ?? "Please try again.");
+      }
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleLinkedIn = async () => {
+    setLinkedinLoading(true);
+    try {
+      await SocialAuthService.signInWithLinkedIn();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      router.replace("/(tabs)");
+    } catch (e: any) {
+      if (e?.message !== "Sign-in was cancelled.") {
+        Alert.alert("LinkedIn Sign-In Failed", e?.message ?? "Please try again.");
+      }
+    } finally {
+      setLinkedinLoading(false);
+    }
+  };
+
+  return (
+    <View style={styles.socialRow}>
+      <TouchableOpacity
+        style={[styles.socialBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
+        onPress={handleGoogle}
+        disabled={googleLoading || linkedinLoading}
+        accessibilityRole="button"
+        accessibilityLabel="Continue with Google"
+      >
+        {googleLoading ? (
+          <ActivityIndicator size="small" color={colors.foreground} />
+        ) : (
+          <Text style={styles.socialEmoji}>G</Text>
+        )}
+        <Text style={[styles.socialLabel, { color: colors.foreground }]}>Google</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.socialBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
+        onPress={handleLinkedIn}
+        disabled={googleLoading || linkedinLoading}
+        accessibilityRole="button"
+        accessibilityLabel="Continue with LinkedIn"
+      >
+        {linkedinLoading ? (
+          <ActivityIndicator size="small" color={colors.foreground} />
+        ) : (
+          <Text style={styles.socialEmoji}>in</Text>
+        )}
+        <Text style={[styles.socialLabel, { color: colors.foreground }]}>LinkedIn</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  scroll: { paddingHorizontal: 24, flexGrow: 1, justifyContent: "center" },
-  header: { alignItems: "center", marginBottom: 40 },
-  logoWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 16,
-    shadowColor: "#2563eb",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 8,
-  },
-  appName: { fontSize: 32, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
-  tagline: { fontSize: 15, fontFamily: "Inter_500Medium", marginTop: 6 },
-  card: {
-    borderRadius: 24,
-    padding: 24,
-    borderWidth: 1,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.05,
-    shadowRadius: 24,
-    elevation: 4,
-  },
-  tabRow: { flexDirection: "row", borderRadius: 12, padding: 4, marginBottom: 24 },
-  tab: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: "center" },
-  tabText: { fontFamily: "Inter_600SemiBold", fontSize: 14 },
-  socialGroup: { gap: 10, marginBottom: 20 },
-  socialBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  socialBtnIcon: { fontSize: 18, fontFamily: "Inter_700Bold", width: 24, textAlign: "center" },
-  socialBtnText: { fontSize: 15, fontFamily: "Inter_600SemiBold", flex: 1 },
-  dividerRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 20 },
-  divider: { flex: 1, height: StyleSheet.hairlineWidth },
-  dividerText: { fontSize: 13, fontFamily: "Inter_500Medium" },
-  fieldGroup: { marginBottom: 20 },
-  label: { fontSize: 13, fontFamily: "Inter_600SemiBold", marginBottom: 8, letterSpacing: 0.2 },
-  input: {
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 15,
-    fontFamily: "Inter_500Medium",
-    borderWidth: 1,
-  },
-  inputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderWidth: 1,
-    gap: 8,
-  },
-  inputInner: { flex: 1, fontSize: 15, fontFamily: "Inter_500Medium" },
-  errorBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 20,
-    borderWidth: 1,
-  },
-  errorText: { fontSize: 14, fontFamily: "Inter_500Medium", flex: 1 },
-  fieldHint: { fontSize: 12, fontFamily: "Inter_500Medium", marginTop: 6, paddingLeft: 4 },
-  typoHint: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginTop: 8,
-    padding: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  typoText: { fontSize: 13, fontFamily: "Inter_500Medium", flex: 1 },
-  btn: {
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: "center",
-    marginTop: 8,
-    shadowColor: "#2563eb",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  btnText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 16, letterSpacing: 0.3 },
-  switchText: { textAlign: "center", marginTop: 20, fontSize: 14, fontFamily: "Inter_500Medium" },
-  verifyDesc: {
-    fontSize: 15,
-    fontFamily: "Inter_500Medium",
-    lineHeight: 22,
-    marginBottom: 20,
-    textAlign: "center",
-  },
-  verifyBox: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  verifyBoxText: { fontSize: 14, fontFamily: "Inter_500Medium", flex: 1, lineHeight: 20 },
-  resendBtn: { alignItems: "center", paddingVertical: 14 },
-  resendText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
-  passwordRules: { gap: 6, marginTop: 8 },
-  passwordRuleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  passwordRuleText: { fontSize: 12, fontFamily: "Inter_500Medium", flex: 1 },
+  root: { flex: 1 },
+  scroll: { paddingHorizontal: 24 },
+  backBtn: { marginBottom: 8, alignSelf: "flex-start", padding: 4 },
+  brand: { alignItems: "center", marginBottom: 28 },
+  logoCircle: { width: 72, height: 72, borderRadius: 36, alignItems: "center", justifyContent: "center", marginBottom: 12 },
+  appName: { fontFamily: "Inter_700Bold", fontSize: 22, letterSpacing: -0.5 },
+  title: { fontFamily: "Inter_700Bold", fontSize: 28, letterSpacing: -0.7, marginBottom: 6 },
+  subtitle: { fontFamily: "Inter_500Medium", fontSize: 15, lineHeight: 23, marginBottom: 24, color: "#888" },
+  primaryBtn: { borderRadius: 16, paddingVertical: 17, alignItems: "center", marginTop: 8, marginBottom: 12 },
+  primaryBtnText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 16 },
+  divider: { flexDirection: "row", alignItems: "center", marginVertical: 16, gap: 10 },
+  dividerLine: { flex: 1, height: 1 },
+  dividerLabel: { fontFamily: "Inter_500Medium", fontSize: 12 },
+  socialRow: { flexDirection: "row", gap: 12, marginBottom: 12 },
+  socialBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1, borderRadius: 14, paddingVertical: 13 },
+  socialEmoji: { fontSize: 18 },
+  socialLabel: { fontFamily: "Inter_600SemiBold", fontSize: 14 },
+  switchRow: { flexDirection: "row", justifyContent: "center", marginTop: 8 },
+  switchText: { fontFamily: "Inter_500Medium", fontSize: 14 },
+  switchLink: { fontFamily: "Inter_700Bold", fontSize: 14 },
+  typoHint: { marginTop: -4, marginBottom: 8, paddingLeft: 4 },
+  typoText: { fontFamily: "Inter_500Medium", fontSize: 13 },
+  mismatch: { fontFamily: "Inter_500Medium", fontSize: 12, marginBottom: 6 },
+  otpWrap: { marginVertical: 24 },
+  resendRow: { flexDirection: "row", justifyContent: "center", marginBottom: 16 },
+  infoCard: { borderRadius: 14, borderWidth: 1, padding: 14 },
+  infoText: { fontFamily: "Inter_500Medium", fontSize: 13, lineHeight: 20 },
+  consentRow: { flexDirection: "row", alignItems: "flex-start", gap: 12, marginVertical: 14 },
+  checkbox: { width: 20, height: 20, borderRadius: 6, borderWidth: 2, alignItems: "center", justifyContent: "center", marginTop: 1 },
+  consentText: { flex: 1, fontFamily: "Inter_500Medium", fontSize: 13, lineHeight: 20 },
+  skipBtn: { alignItems: "center", paddingVertical: 14 },
+  skipText: { fontFamily: "Inter_500Medium", fontSize: 14 },
+});
+
+const fieldStyles = StyleSheet.create({
+  wrap: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 14, marginBottom: 12, gap: 10 },
+  input: { flex: 1, fontFamily: "Inter_500Medium", fontSize: 15 },
+});
+
+const errStyles = StyleSheet.create({
+  wrap: { flexDirection: "row", alignItems: "flex-start", gap: 8, backgroundColor: "#ef444418", borderRadius: 10, padding: 12, marginBottom: 10 },
+  text: { flex: 1, color: "#ef4444", fontFamily: "Inter_500Medium", fontSize: 13, lineHeight: 20 },
 });
