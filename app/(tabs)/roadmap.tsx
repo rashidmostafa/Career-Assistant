@@ -1,5 +1,6 @@
 import { Map, ChevronDown, ChevronUp, CheckCircle2, Circle, BookOpen, Play, RefreshCw, Zap, ExternalLink, Lock } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 import { Linking } from "react-native";
 import React, { useState, useMemo } from "react";
 import {
@@ -158,7 +159,15 @@ export default function RoadmapScreen() {
   if (!roadmap) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border, backgroundColor: colors.background }]}>
+        <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}>
+          <LinearGradient
+            colors={[(roadmapColor || "#2563eb") + "18", colors.card, colors.background]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.headerGradient}
+          />
+          <View style={[styles.headerBlob, styles.headerBlobOne, { backgroundColor: (roadmapColor || "#2563eb") + "18" }]} />
+          <View style={[styles.headerBlob, styles.headerBlobTwo, { backgroundColor: colors.success + "14" }]} />
           <View>
             <Text style={[styles.headerTitle, { color: colors.foreground }]}>Roadmap</Text>
             <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>Role-specific · 3 levels · 12 weeks</Text>
@@ -193,7 +202,15 @@ export default function RoadmapScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border, backgroundColor: colors.background }]}>
+      <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}>
+        <LinearGradient
+          colors={[(roadmapColor || "#2563eb") + "18", colors.card, colors.background]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.headerGradient}
+        />
+        <View style={[styles.headerBlob, styles.headerBlobOne, { backgroundColor: (roadmapColor || "#2563eb") + "18" }]} />
+        <View style={[styles.headerBlob, styles.headerBlobTwo, { backgroundColor: colors.success + "14" }]} />
         <View style={{ flex: 1 }}>
           <Text style={[styles.headerTitle, { color: colors.foreground }]}>Roadmap</Text>
           <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>{roadmap.role} · {progressPct}% complete</Text>
@@ -262,7 +279,11 @@ export default function RoadmapScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth, marginBottom: 0 },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth, marginBottom: 0, position: "relative", overflow: "hidden" },
+  headerGradient: { ...StyleSheet.absoluteFillObject },
+  headerBlob: { position: "absolute", borderRadius: 999 },
+  headerBlobOne: { width: 140, height: 140, right: -30, top: 10 },
+  headerBlobTwo: { width: 96, height: 96, left: -20, top: 54 },
   headerTitle: { fontSize: 24, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
   headerSub: { fontSize: 14, fontFamily: "Inter_500Medium", marginTop: 3 },
   refreshBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
@@ -276,7 +297,7 @@ const styles = StyleSheet.create({
   levelPreviewLabel: { fontFamily: "Inter_700Bold", fontSize: 13 },
   generateBtn: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 18, paddingHorizontal: 32, borderRadius: 20 },
   generateBtnText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 17 },
-  progressCard: { borderRadius: 20, padding: 20, borderWidth: 1, marginBottom: 24 },
+  progressCard: { borderRadius: 20, padding: 20, borderWidth: 1, marginBottom: 24, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.05, shadowRadius: 12, elevation: 2 },
   progressRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
   progressTitle: { fontFamily: "Inter_700Bold", fontSize: 16 },
   progressPct: { fontFamily: "Inter_700Bold", fontSize: 24, letterSpacing: -0.5 },
@@ -292,7 +313,7 @@ const styles = StyleSheet.create({
   lvBadgeText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 12 },
   lockBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, width: "100%", marginTop: 6 },
   lockText: { fontSize: 11, fontFamily: "Inter_500Medium" },
-  moduleCard: { borderRadius: 20, padding: 20, borderWidth: 1, marginBottom: 10 },
+  moduleCard: { borderRadius: 20, padding: 20, borderWidth: 1, marginBottom: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.04, shadowRadius: 10, elevation: 1 },
   moduleHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
   moduleHeaderLeft: { flex: 1, flexDirection: "row", gap: 12, alignItems: "flex-start" },
   moduleHeaderRight: { flexDirection: "row", alignItems: "center", gap: 8 },
