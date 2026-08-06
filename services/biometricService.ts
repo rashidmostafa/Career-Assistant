@@ -129,7 +129,9 @@ export const BiometricService = {
   /**
    * Clears the stored biometric credential from SecureStore.
    */
-  async clearCredential(): Promise<void> {
+  async clearCredential(userId?: string): Promise<void> {
+    const storedUserId = await secureGet(USER_ID_KEY);
+    if (userId && storedUserId && storedUserId !== userId) return;
     await secureDel(CREDENTIAL_ID_KEY);
     await secureDel(USER_ID_KEY);
     await AsyncStorage.removeItem(BIOMETRIC_ENABLED_KEY);
@@ -141,7 +143,7 @@ export const BiometricService = {
    *  2. Reads credential ID + userId from SecureStore.
    *  3. Returns them so the caller can POST to /api/auth/biometric/verify.
    */
-  async biometricLogin(): Promise<{ credentialIdHash: string; userId: string } | null> {
+  async biometricLogin(userId?: string): Promise<{ credentialIdHash: string; userId: string } | null> {
     const enabledRaw = await AsyncStorage.getItem(BIOMETRIC_ENABLED_KEY);
     if (enabledRaw !== "true") return null;
 
@@ -149,11 +151,12 @@ export const BiometricService = {
     if (!auth.success) return null;
 
     const credentialId = await secureGet(CREDENTIAL_ID_KEY);
-    const userId       = await secureGet(USER_ID_KEY);
-    if (!credentialId || !userId) return null;
+    const storedUserId = await secureGet(USER_ID_KEY);
+    if (!credentialId || !storedUserId) return null;
+    if (userId && storedUserId !== userId) return null;
 
     const credentialIdHash = await sha256(credentialId);
-    return { credentialIdHash, userId };
+    return { credentialIdHash, userId: storedUserId };
   },
 
   /**

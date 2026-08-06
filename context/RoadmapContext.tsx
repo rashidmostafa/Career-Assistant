@@ -494,7 +494,8 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
       let found: Skill | null = null;
       weeks.forEach((w) => { const s = w.skills.find((sk) => sk.id === skillId); if (s) found = s; });
       if (!found || careerTrackSkills.find((s) => s.id === skillId)) return;
-      const updated = [...careerTrackSkills, { ...found, inCareerTrack: true }];
+      const foundSkill = found as Skill;
+      const updated = [...careerTrackSkills, { ...foundSkill, inCareerTrack: true, status: "Mastered" as SkillStatus }];
       setCareerTrackSkills(updated);
       await save(weeks, updated, jobDeadlines, targetRole);
     },

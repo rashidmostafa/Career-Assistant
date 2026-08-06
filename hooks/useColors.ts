@@ -18,7 +18,7 @@ export function useColors() {
   const { resolvedTheme } = useThemeMode();
   const palette =
     resolvedTheme === "dark" && "dark" in colors
-      ? (colors as Record<string, typeof colors.light>).dark
+      ? (colors as any).dark
       : colors.light;
   return { ...palette, radius: colors.radius };
 }
