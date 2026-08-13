@@ -101,7 +101,7 @@ export const BiometricService = {
         error:
           result.error === "user_cancel"
             ? "Authentication cancelled."
-            : result.error === "lockout" || result.error === "lockout_permanent"
+            : result.error === "lockout"
             ? "Too many failed attempts. Use your passcode."
             : "Authentication failed.",
       };
