@@ -1,3 +1,4 @@
+require("dotenv").config();
 /**
  * Career Assistant — Auth API Server
  * Node.js + Express + MongoDB + JWT + bcrypt + TOTP (speakeasy)
@@ -33,7 +34,6 @@
  *   GET    /api/user/audit-log        (authenticated)
  *   GET    /health
  */
-require("dotenv").config();
 const express    = require("express");
 const helmet     = require("helmet");
 const cors       = require("cors");
@@ -81,15 +81,6 @@ initPassport(app);
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
-
-// Add this BEFORE your other routes
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
-});
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => {

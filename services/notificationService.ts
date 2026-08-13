@@ -8,13 +8,6 @@
  *
  * Uses expo-notifications for local scheduling. For Firebase Cloud Messaging
  * (FCM) push tokens, the token is obtained here and can be sent to the server.
- *
- * Task 1 fix — Prevent silent push notification failures when tokens expire
- * or users switch devices:
- *  - registerForPushNotificationsWithResult() returns { token, error } instead of null
- *  - refreshPushTokenIfChanged() detects stale tokens and re-registers
- *  - onPushTokenChange callback lets callers re-sync the server when the
- *    token rotates (e.g. app reinstall, device swap)
  */
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-constants";
@@ -22,8 +15,8 @@ import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { ReauthUrgency } from "./sessionManager";
 
-const PUSH_TOKEN_KEY  = "auth_push_token";
-const NOTIF_IDS_KEY   = "auth_scheduled_notif_ids";
+const PUSH_TOKEN_KEY = "auth_push_token";
+const NOTIF_IDS_KEY  = "auth_scheduled_notif_ids";
 
 // Configure foreground presentation
 Notifications.setNotificationHandler({
@@ -55,103 +48,25 @@ export async function requestNotificationPermission(): Promise<boolean> {
   return status === "granted";
 }
 
-// ─── Push token result ────────────────────────────────────────────────────────
-export interface PushTokenResult {
-  token: string | null;
-  /** Human-readable reason when token is null. */
-  error: string | null;
-  /** True when the token changed since the last registration (device swap, reinstall). */
-  tokenChanged: boolean;
-}
-
-/**
- * Task 1 — Main registration entry point.
- * Returns a structured result instead of silently returning null so callers
- * can surface a meaningful error or re-sync the server when the token rotates.
- *
- * Typical usage in AuthContext / login flow:
- *   const { token, error, tokenChanged } = await registerForPushNotificationsWithResult();
- *   if (error) console.warn("[Push]", error);
- *   if (tokenChanged && token) await AuthApiService.updatePushToken(token); // best-effort
- */
-export async function registerForPushNotificationsWithResult(): Promise<PushTokenResult> {
-  // Permission check
-  const granted = await requestNotificationPermission();
-  if (!granted) {
-    return { token: null, error: "Push notification permission denied.", tokenChanged: false };
-  }
-
-  // Physical device requirement (simulators cannot receive push)
-  const isPhysicalDevice = (Device.default?.isDevice ?? false) as boolean;
-  if (!isPhysicalDevice) {
-    return {
-      token: null,
-      error: "Push notifications require a physical device.",
-      tokenChanged: false,
-    };
-  }
-
+// ─── Push token (for FCM / APNs) ──────────────────────────────────────────────
+export async function registerForPushNotifications(): Promise<string | null> {
   try {
+    const granted = await requestNotificationPermission();
+    if (!granted) return null;
+
+    // projectId is required for production EAS builds; for Expo Go it is optional
     const projectId =
       (Device.default?.expoConfig?.extra as any)?.eas?.projectId ?? undefined;
 
-    const { data: freshToken } = projectId
+    const { data: token } = projectId
       ? await Notifications.getExpoPushTokenAsync({ projectId })
       : await Notifications.getExpoPushTokenAsync();
 
-    const storedToken = await AsyncStorage.getItem(PUSH_TOKEN_KEY);
-    const tokenChanged = storedToken !== null && storedToken !== freshToken;
-
-    // Always persist the latest token
-    await AsyncStorage.setItem(PUSH_TOKEN_KEY, freshToken);
-
-    return { token: freshToken, error: null, tokenChanged };
-  } catch (err: any) {
-    // Surface the real error instead of swallowing it
-    const message: string =
-      err?.message ?? "Failed to obtain push token. Check your network or Expo project config.";
-    return { token: null, error: message, tokenChanged: false };
+    await AsyncStorage.setItem(PUSH_TOKEN_KEY, token);
+    return token;
+  } catch {
+    return null;
   }
-}
-
-/**
- * Task 1 — Detect and refresh a stale push token.
- * Call on every app foreground event so token rotations (after a device swap,
- * OS reinstall, or APNs/FCM token revocation) are caught early rather than
- * failing silently when a notification is sent.
- *
- * @param onTokenChanged  Optional callback — receives the new token when rotation
- *                        is detected so the caller can re-sync with the server.
- */
-export async function refreshPushTokenIfChanged(
-  onTokenChanged?: (newToken: string) => void | Promise<void>,
-): Promise<void> {
-  const result = await registerForPushNotificationsWithResult();
-
-  if (result.error) {
-    // Permission revoked or physical-device check failed — clear the stale
-    // stored token so we don't try to send to a dead endpoint.
-    await AsyncStorage.removeItem(PUSH_TOKEN_KEY);
-    return;
-  }
-
-  if (result.tokenChanged && result.token) {
-    try {
-      await onTokenChanged?.(result.token);
-    } catch {
-      // Best-effort — server sync can fail without breaking the app
-    }
-  }
-}
-
-// ─── Legacy helper (kept for backward compatibility) ──────────────────────────
-/**
- * @deprecated Prefer registerForPushNotificationsWithResult() so callers
- * can distinguish permission denial from network errors.
- */
-export async function registerForPushNotifications(): Promise<string | null> {
-  const { token } = await registerForPushNotificationsWithResult();
-  return token;
 }
 
 export async function getStoredPushToken(): Promise<string | null> {
@@ -279,11 +194,8 @@ export async function sendImmediateReminder(urgency: ReauthUrgency): Promise<voi
 }
 
 export const NotificationService = {
-  requestPermission:                    requestNotificationPermission,
-  /** @deprecated Use registerForPushNotificationsWithResult instead */
-  registerForPush:                      registerForPushNotifications,
-  registerForPushWithResult:            registerForPushNotificationsWithResult,
-  refreshPushTokenIfChanged,
+  requestPermission:         requestNotificationPermission,
+  registerForPush:           registerForPushNotifications,
   getStoredPushToken,
   scheduleSessionReminders,
   cancelScheduledReminders,

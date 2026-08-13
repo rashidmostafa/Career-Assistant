@@ -297,6 +297,7 @@ export const AuthApiService = {
     experienceLevel: string;
     background: string;
     photoUri: string;
+    onboardingComplete: boolean;
   }>): Promise<any> {
     if (!BASE) throw new Error("NO_BACKEND");
     return apiFetch("/api/user/profile", { method: "PATCH", body: JSON.stringify(data) }, true);

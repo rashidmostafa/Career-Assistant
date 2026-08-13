@@ -74,8 +74,6 @@ export default function AuthScreen() {
     signIn, signUp, confirmEmailVerified, resendVerification,
     pendingVerificationEmail, pendingUserId, biometricAvailable,
     biometricType, loginWithBiometric, setSecurityQuestions,
-    // Task 3 — biometric enrolment prompt
-    shouldPromptBiometricEnroll, dismissBiometricPrompt, enrollBiometric,
   } = useAuth();
 
   // Biometric hook — drives real enrol/login/auto-prompt
@@ -94,6 +92,8 @@ export default function AuthScreen() {
   const [otpError, setOtpError] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [otpTimer, setOtpTimer] = useState(0);
+  const otpTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const [consentGiven, setConsentGiven] = useState(false);
 
   const pwRules = getPasswordRules(password);
@@ -136,48 +136,6 @@ export default function AuthScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
-  // ── Task 3: Auto biometric enrolment prompt after first login ─────────────────
-  // Fires once after a successful password-based login or email verification
-  // when the device supports biometrics but the user has not yet enrolled.
-  // We show the native Alert here (in the auth screen) so the user sees it
-  // before being routed away, giving them a clear moment to respond.
-  React.useEffect(() => {
-    if (!shouldPromptBiometricEnroll) return;
-
-    const label = biometric.biometricLabel || "Biometric";
-    Alert.alert(
-      `Enable ${label} Sign-In?`,
-      `Sign in faster next time using ${label} instead of your password. Your biometric data never leaves this device.`,
-      [
-        {
-          text: "Not Now",
-          style: "cancel",
-          onPress: () => {
-            dismissBiometricPrompt();
-          },
-        },
-        {
-          text: `Enable ${label}`,
-          onPress: async () => {
-            // enrollBiometric() shows the native prompt internally
-            const userId = pendingUserId ?? undefined;
-            const ok = userId
-              ? await biometric.enroll(userId)
-              : await enrollBiometric();
-            if (ok) {
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-            } else {
-              dismissBiometricPrompt();
-            }
-          },
-        },
-      ],
-      { cancelable: false },
-    );
-  // Only re-run when the flag flips to true — not on every render
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shouldPromptBiometricEnroll]);
-
   // ── Biometric login ──────────────────────────────────────────────────────────
   const handleBiometricLogin = useCallback(async () => {
     setError(null);
@@ -218,6 +176,18 @@ export default function AuthScreen() {
       await signUp({ name: name.trim(), email: email.trim().toLowerCase(), password, phone: phone.trim() || undefined });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       setMode("verify-otp");
+      // Start 10-minute countdown timer
+      setOtpTimer(10 * 60);
+      if (otpTimerRef.current) clearInterval(otpTimerRef.current);
+      otpTimerRef.current = setInterval(() => {
+        setOtpTimer((t) => {
+          if (t <= 1) {
+            clearInterval(otpTimerRef.current!);
+            return 0;
+          }
+          return t - 1;
+        });
+      }, 1000);
     } catch (e: any) {
       setError(e.message);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
@@ -444,7 +414,7 @@ export default function AuthScreen() {
         )}
 
         {/* ── OTP VERIFY ── */}
-        {(mode === "verify-otp" || pendingVerificationEmail) && mode !== "security-questions" && (
+        {mode === "verify-otp" && (
           <Animated.View entering={FadeInDown.duration(350)}>
             <Text style={[styles.title, { color: colors.foreground }]}>Verify your email</Text>
             <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
@@ -475,10 +445,29 @@ export default function AuthScreen() {
               </TouchableOpacity>
             </View>
 
-            <View style={[styles.infoCard, { backgroundColor: colors.accent, borderColor: colors.border }]}>
-              <Text style={[styles.infoText, { color: colors.accentForeground }]}>
-                🔒 Code expires in 10 minutes. Check your spam folder if you don't see it.
-              </Text>
+            <View style={[styles.infoCard, { backgroundColor: otpTimer <= 60 && otpTimer > 0 ? "#ef444418" : otpTimer === 0 ? "#ef444418" : colors.accent, borderColor: otpTimer <= 60 && otpTimer > 0 ? "#ef4444" : colors.border }]}>
+              {otpTimer > 0 ? (
+                <View style={{ alignItems: "center" }}>
+                  <Text style={[styles.infoText, { color: otpTimer <= 60 ? "#ef4444" : colors.accentForeground, textAlign: "center" }]}>
+                    {otpTimer <= 60 ? "⚠️" : "🔒"} Code expires in{" "}
+                    <Text style={{ fontFamily: "Inter_700Bold" }}>
+                      {String(Math.floor(otpTimer / 60)).padStart(2, "0")}:{String(otpTimer % 60).padStart(2, "0")}
+                    </Text>
+                  </Text>
+                  <View style={{ width: "100%", height: 4, backgroundColor: colors.border, borderRadius: 2, marginTop: 10 }}>
+                    <View style={{
+                      width: `${(otpTimer / 600) * 100}%`,
+                      height: 4,
+                      backgroundColor: otpTimer <= 60 ? "#ef4444" : otpTimer <= 180 ? "#f59e0b" : "#6366f1",
+                      borderRadius: 2,
+                    }} />
+                  </View>
+                </View>
+              ) : (
+                <Text style={[styles.infoText, { color: "#ef4444", textAlign: "center" }]}>
+                  ⏰ Code expired. Please request a new one.
+                </Text>
+              )}
             </View>
           </Animated.View>
         )}

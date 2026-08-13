@@ -80,7 +80,7 @@ const UserSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // ── Indexes ───────────────────────────────────────────────────────────────────
-UserSchema.index({ email: 1 });
+
 UserSchema.index({ provider: 1, providerId: 1 }, { sparse: true });
 UserSchema.index({ "trustedDevices.deviceId": 1 });
 UserSchema.index({ deletionScheduledAt: 1 }, { sparse: true });

@@ -14,6 +14,51 @@ const { issueAccessToken, issueRefreshToken, verifyRefreshToken } = require("../
 const { blockIP } = require("../middleware/rateLimiter");
 const EmailService = require("./emailService");
 const SmsService   = require("./smsService");
+const dns = require("dns").promises;
+
+// ── Disposable email domain blocklist ─────────────────────────────────────────
+const DISPOSABLE_DOMAINS = new Set([
+  "mailinator.com","guerrillamail.com","tempmail.com","throwaway.email",
+  "fakeinbox.com","sharklasers.com","guerrillamail.info","guerrillamail.biz",
+  "guerrillamail.de","guerrillamail.net","guerrillamail.org","spam4.me",
+  "trashmail.com","trashmail.me","trashmail.net","dispostable.com",
+  "maildrop.cc","yopmail.com","yopmail.fr","10minutemail.com",
+  "10minutemail.net","20minutemail.com","tempr.email","discard.email",
+  "spamgourmet.com","spamgourmet.net","spamgourmet.org",
+]);
+
+async function validateEmailDomain(email) {
+  const domain = email.split("@")[1]?.toLowerCase();
+  if (!domain) throw Object.assign(new Error("Invalid email address."), { status: 400 });
+
+  if (DISPOSABLE_DOMAINS.has(domain)) {
+    throw Object.assign(
+      new Error("Disposable email addresses are not allowed. Please use a real email."),
+      { status: 400 }
+    );
+  }
+
+  try {
+    const records = await dns.resolveMx(domain);
+    if (!records || records.length === 0) {
+      throw Object.assign(
+        new Error("This email domain does not appear to be valid. Please use a real email address."),
+        { status: 400 }
+      );
+    }
+  } catch (err) {
+    if (err.status) throw err; // re-throw our own validation errors
+    // DNS errors: ENOTFOUND = domain doesn't exist, ENODATA = no MX records
+    if (err.code === "ENOTFOUND" || err.code === "ENODATA" || err.code === "ESERVFAIL") {
+      throw Object.assign(
+        new Error("This email domain does not exist. Please use a real email address."),
+        { status: 400 }
+      );
+    }
+    // For other DNS errors (timeouts etc), allow through to avoid blocking real users
+    console.warn("[Auth] DNS check warning:", err.code, domain);
+  }
+}
 
 // ─── OTP store (use Redis in production) ─────────────────────────────────────
 const otpStore = new Map();
@@ -97,6 +142,9 @@ const AuthService = {
 
   // ── Register ─────────────────────────────────────────────────────────────────
   async register({ name, email, password, phone, securityQuestions, consentGiven, pushToken }, req) {
+    // Validate email domain has real MX records and is not disposable
+    await validateEmailDomain(email);
+
     const existing = await User.findOne({ email: email.toLowerCase() });
     if (existing) {
       throw Object.assign(new Error("An account with this email already exists."), { status: 409 });
@@ -114,6 +162,17 @@ const AuthService = {
     // Email OTP
     const emailOtp = generateOtp();
     storeOtp(`email_verify_${user._id}`, emailOtp);
+
+    // Auto-delete account if email not verified within 10 minutes
+    setTimeout(async () => {
+      try {
+        const u = await User.findById(user._id);
+        if (u && !u.emailVerified) {
+          await User.findByIdAndDelete(user._id);
+          console.log(`[Auth] Deleted unverified account: ${email}`);
+        }
+      } catch (_) {}
+    }, 10 * 60 * 1000);
     await EmailService.sendOtp(user.email, emailOtp, "verification");
     console.log(`[DEV] Email OTP for ${email}: ${emailOtp}`);
 
@@ -186,6 +245,7 @@ const AuthService = {
 
   // ── Login ─────────────────────────────────────────────────────────────────────
   async login({ email, password, deviceId }, req) {
+    await validateEmailDomain(email);
     const user = await User.findOne({ email: email.toLowerCase() }).select("+passwordHash +totpSecret +backupCodes");
     if (!user) {
       throw Object.assign(new Error("Invalid email or password."), { status: 401 });

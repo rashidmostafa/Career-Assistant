@@ -57,6 +57,8 @@ function buildGoogleStrategy() {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
       callbackURL,
       scope: ["openid", "profile", "email"],
+      // Pass the request object so we can read session data in the verify callback
+      passReqToCallback: false,
     },
     async (_accessToken, _refreshToken, profile, done) => {
       try {
@@ -100,7 +102,8 @@ function buildLinkedInStrategy() {
           name: profile.displayName ?? email.split("@")[0],
           avatarUrl,
         });
-        done(null, done);
+        // FIX: was incorrectly passing `done` instead of `user`
+        done(null, user);
       } catch (e) {
         done(e);
       }
@@ -134,8 +137,20 @@ function initPassport(app) {
     },
   }));
 
-  passport.use(buildGoogleStrategy());
-  passport.use(buildLinkedInStrategy());
+  const hasGoogleConfig = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  const hasLinkedInConfig = Boolean(process.env.LINKEDIN_CLIENT_ID && process.env.LINKEDIN_CLIENT_SECRET);
+
+  if (hasGoogleConfig) {
+    passport.use(buildGoogleStrategy());
+  } else {
+    console.warn("[Passport] Google OAuth not configured; skipping Google strategy.");
+  }
+
+  if (hasLinkedInConfig) {
+    passport.use(buildLinkedInStrategy());
+  } else {
+    console.warn("[Passport] LinkedIn OAuth not configured; skipping LinkedIn strategy.");
+  }
 
   app.use(passport.initialize());
   app.use(passport.session());

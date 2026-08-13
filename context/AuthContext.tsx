@@ -12,16 +12,6 @@
  *  - Security questions
  *  - GDPR helpers
  *  - Account lockout
- *
- * Task 2 fix — Credential mismatch: loginWithBiometric now passes the stored
- *   userId to BiometricService.biometricLogin() so the pre-prompt mismatch
- *   check runs before any OS biometric attempt is consumed.
- *
- * Task 3 fix — Auto biometric enrolment: after a successful password-based
- *   signIn() or email verification, if the device supports biometrics and the
- *   user has not yet enrolled, shouldPromptBiometricEnroll is set to true.
- *   Callers read this flag and show a non-blocking enrolment prompt.
- *   Call dismissBiometricPrompt() once the user responds (accept or decline).
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, {
@@ -85,9 +75,7 @@ export interface AuthContextType {
   // ── Biometric ───────────────────────────────────────────────────────────────
   biometricAvailable: boolean;
   biometricType: "FaceID" | "Fingerprint" | "None";
-  shouldPromptBiometricEnroll: boolean;
-  dismissBiometricPrompt: () => void;
-  // ── Legacy API ──────────────────────────────────────────────────────────────
+  // ── Legacy API (backward compat) ────────────────────────────────────────────
   signIn: (email: string, password: string) => Promise<{ require2FA?: boolean; userId?: string }>;
   signUp: (data: { name: string; email: string; password: string; phone?: string }) => Promise<void>;
   signOut: () => Promise<void>;
@@ -104,10 +92,9 @@ export interface AuthContextType {
   setSecurityQuestions: (questions: SecurityQuestion[]) => Promise<void>;
   verifySecurityAnswers: (answers: Array<{ question: string; answer: string }>) => Promise<boolean>;
   getSecurityQuestions: () => Promise<string[]>;
-  // ── Social auth ──────────────────────────────────────────────────────────────
+  // ── Social auth ───────────────────────────────────────────────────────────────
   signInWithSocial: (provider: "google" | "linkedin") => Promise<void>;
-  // ✅ ADD THIS NEW LINE
-  handleOAuthCallback: (accessToken: string, refreshToken: string) => Promise<void>;
+  loadUserFromServer: () => Promise<void>;
   // ── GDPR ─────────────────────────────────────────────────────────────────────
   exportData: () => Promise<object>;
   requestAccountDeletion: () => Promise<void>;
@@ -120,14 +107,12 @@ const MAX_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
 
 const STORE = {
-  USER:          "auth_user_v2",
-  USERS:         "auth_users_v2",
+  USER:         "auth_user_v2",
+  USERS:        "auth_users_v2",
   PENDING_EMAIL: "auth_pending_email",
-  PENDING_USER:  "auth_pending_user",
-  SECURITY_Q:    "auth_security_questions",
-  REAUTH_TS:     "auth_last_reauth_ts",
-  // Task 3 — tracks whether the one-time first-login biometric prompt has been shown
-  BIO_PROMPT_SHOWN: "auth_biometric_prompt_shown",
+  PENDING_USER: "auth_pending_user",
+  SECURITY_Q:   "auth_security_questions",
+  REAUTH_TS:    "auth_last_reauth_ts",
 } as const;
 
 // ─── Context ───────────────────────────────────────────────────────────────────
@@ -174,8 +159,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [riskLevel, setRiskLevel] = useState<RiskLevel | null>(null);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricType, setBiometricType] = useState<"FaceID" | "Fingerprint" | "None">("None");
-  // Task 3 — biometric enrolment prompt flag
-  const [shouldPromptBiometricEnroll, setShouldPromptBiometricEnroll] = useState(false);
 
   const sessionTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -199,7 +182,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
     })();
 
-    // Biometric availability check
+    // Biometric check
     BiometricService.getAvailability().then(({ available, type }) => {
       setBiometricAvailable(available);
       setBiometricType(type);
@@ -244,27 +227,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const idx = users.findIndex((x) => x.id === u.id);
     if (idx >= 0) users[idx] = { ...users[idx], ...u };
     await AsyncStorage.setItem(STORE.USERS, JSON.stringify(users));
-  }
-
-  // ── Task 3 — check whether to show the biometric enrolment prompt ─────────────
-  /**
-   * Fires after any successful password-based login or email verification.
-   * Sets shouldPromptBiometricEnroll = true when:
-   *   - the device supports biometrics
-   *   - the user has not yet enrolled biometrics for this account
-   *   - we have not already shown the one-time prompt for this user
-   */
-  async function maybePromptBiometricEnroll(loggedInUser: User): Promise<void> {
-    if (loggedInUser.biometricEnabled) return; // already enrolled
-    const { available } = await BiometricService.getAvailability();
-    if (!available) return; // hardware not present
-
-    // Check per-user flag so we only prompt once per account
-    const shownKey = `${STORE.BIO_PROMPT_SHOWN}_${loggedInUser.id}`;
-    const alreadyShown = await AsyncStorage.getItem(shownKey);
-    if (alreadyShown === "true") return;
-
-    setShouldPromptBiometricEnroll(true);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -332,6 +294,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Check device trust + 2FA
     const trusted = await SessionManager.isDeviceTrusted();
+    if (found.twoFactorEnabled && !trusted && !risk.require2FA === false) {
+      // Also require 2FA when risk is HIGH/CRITICAL regardless of user setting
+    }
 
     if (found.twoFactorEnabled && !trusted) {
       // Need 2FA — set pending state
@@ -352,16 +317,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       expiresAt:    Date.now() + 15 * 60 * 1000,
     });
 
-    // Task 2 — proactively clear any stale biometric credential for a different
-    // account before the new session is used (prevents mismatch lockouts).
-    await BiometricService.clearIfMismatch(finalUser.id);
+    // Biometric credential sync
+    if (finalUser.biometricEnabled) {
+      await BiometricService.saveCredential(finalUser.id, `bio_${finalUser.id}`);
+    }
 
     setPendingVerificationEmail(null);
     await AsyncStorage.removeItem(STORE.PENDING_EMAIL);
-
-    // Task 3 — prompt for biometric enrolment if appropriate
-    await maybePromptBiometricEnroll(finalUser);
-
     return {};
   }, []);
 
@@ -418,52 +380,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       accountLocked: false,
     };
 
-      // ── Social sign-in ────────────────────────────────────────────────────────────
-  const signInWithSocial = useCallback(async (provider: "google" | "linkedin") => {
-    const { SocialAuthService } = await import("@/services/socialAuthService");
-    await SocialAuthService[provider === "google" ? "signInWithGoogle" : "signInWithLinkedIn"]();
-    try {
-      const { AuthApiService } = await import("@/services/authApiService");
-      const profile = await AuthApiService.getProfile();
-      if (profile?.user) await persistUser(profile.user as User);
-    } catch {
-      // No backend in dev — leave user state as-is; the session is valid.
-    }
-  }, []);
-
-  // ── OAuth Callback Handler ────────────────────────────────────────────────────
-  // ✅ ADD THIS ENTIRE FUNCTION
-  const handleOAuthCallback = useCallback(async (accessToken: string, refreshToken: string) => {
-    try {
-      setIsLoading(true);
-      console.log('🔑 Processing OAuth callback...');
-      
-      // Store tokens securely
-      await SessionManager.saveTokens({
-        accessToken,
-        refreshToken,
-        expiresAt: Date.now() + 56 * 24 * 60 * 60 * 1000, // 8 weeks
-      });
-      
-      // Fetch user profile from backend
-      const { AuthApiService } = await import("@/services/authApiService");
-      const profile = await AuthApiService.getProfile();
-      
-      if (profile?.user) {
-        // Save user to local storage
-        await persistUser(profile.user as User);
-        console.log('✅ OAuth login successful for:', profile.user.name);
-      } else {
-        console.warn('⚠️ No user profile returned from OAuth');
-      }
-    } catch (error) {
-      console.error('❌ OAuth callback error:', error);
-      throw error;
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
     const usersRaw = await AsyncStorage.getItem(STORE.USERS);
     const users: StoredUser[] = usersRaw ? JSON.parse(usersRaw) : [];
     const idx = users.findIndex((u) => u.id === verifiedUser.id);
@@ -482,9 +398,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(verifiedUser);
     setPendingVerificationEmail(null);
     setPendingUserId(null);
-
-    // Task 3 — prompt for biometric enrolment after first-time email verification
-    await maybePromptBiometricEnroll(verifiedUser);
   }, []);
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -549,12 +462,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const raw = await AsyncStorage.getItem(STORE.USER);
     const storedUser: User | null = raw ? JSON.parse(raw) : null;
     if (!storedUser?.biometricEnabled || !storedUser.id) return false;
-
-    // Task 2 — pass the expected userId so BiometricService can validate the
-    // stored credential BEFORE consuming a native biometric attempt.
-    const credential = await BiometricService.biometricLogin(storedUser.id);
-    if (!credential) return false;
-
+    const token = await BiometricService.biometricLogin(storedUser.id);
+    if (!token) return false;
     storedUser.lastLogin = Date.now();
     await persistUser(storedUser);
     await SessionManager.saveTokens({
@@ -567,31 +476,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const enrollBiometric = useCallback(async (): Promise<boolean> => {
     if (!user) return false;
-    const { success } = await BiometricService.authenticate("Enroll biometric for sign-in");
+    const success = await BiometricService.authenticate("Enroll biometric for sign-in");
     if (!success) return false;
-    const credentialId = `${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const result = await BiometricService.saveCredential(credentialId, user.id);
-    if (!result) return false;
+    await BiometricService.saveCredential(user.id, `bio_${user.id}`);
     await persistUser({ ...user, biometricEnabled: true });
-    // Mark prompt as shown once they actually enrol
-    await AsyncStorage.setItem(`${STORE.BIO_PROMPT_SHOWN}_${user.id}`, "true");
-    setShouldPromptBiometricEnroll(false);
     return true;
   }, [user]);
 
   const disableBiometric = useCallback(async () => {
     if (!user) return;
-    await BiometricService.clearCredential();
+    await BiometricService.clearCredential(user.id);
     await persistUser({ ...user, biometricEnabled: false });
-  }, [user]);
-
-  // Task 3 — dismiss biometric prompt and remember the decision per-user
-  const dismissBiometricPrompt = useCallback(async () => {
-    setShouldPromptBiometricEnroll(false);
-    if (user) {
-      // Record that the prompt was shown (and declined) so we don't re-surface it
-      await AsyncStorage.setItem(`${STORE.BIO_PROMPT_SHOWN}_${user.id}`, "true");
-    }
   }, [user]);
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -681,7 +576,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setReauthUrgency("none");
     setRiskLevel(null);
-    setShouldPromptBiometricEnroll(false);
   }, []);
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -697,6 +591,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   ) => {
     if (!user) return;
     await persistUser({ ...user, background, experienceLevel, targetRole, onboardingComplete: true });
+    // Sync to MongoDB so Google/LinkedIn sign-in doesn't reset onboarding state
+    try {
+      const { AuthApiService } = await import("@/services/authApiService");
+      await AuthApiService.updateProfile({ background, experienceLevel, targetRole, onboardingComplete: true });
+    } catch (e) {
+      console.warn("[AuthContext] Failed to sync onboarding to server:", e);
+    }
   }, [user]);
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -749,31 +650,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const handleOAuthCallback = useCallback(async (accessToken: string, refreshToken: string) => {
+  // ── Load user from server (called after OAuth deep-link callback) ────────────
+  const loadUserFromServer = useCallback(async () => {
     try {
-      setIsLoading(true);
-      console.log('🔑 Processing OAuth callback...');
-      
-      // Store tokens securely
-      await SessionManager.saveTokens({
-        accessToken,
-        refreshToken,
-        expiresAt: Date.now() + 56 * 24 * 60 * 60 * 1000,
-      });
-      
-      // Fetch user profile from backend
       const { AuthApiService } = await import("@/services/authApiService");
       const profile = await AuthApiService.getProfile();
-      
       if (profile?.user) {
         await persistUser(profile.user as User);
-        console.log('✅ OAuth login successful for:', profile.user.name);
       }
-    } catch (error) {
-      console.error('❌ OAuth callback error:', error);
-      throw error;
-    } finally {
-      setIsLoading(false);
+    } catch (e) {
+      console.warn("[AuthContext] loadUserFromServer failed:", e);
+      // Try loading from AsyncStorage as fallback
+      const raw = await AsyncStorage.getItem(STORE.USER);
+      if (raw) setUser(JSON.parse(raw));
     }
   }, []);
 
@@ -783,13 +672,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user, isLoading, pendingVerificationEmail, pendingUserId,
       reauthUrgency, sessionDaysRemaining, riskLevel,
       pending2FAUserId, biometricAvailable, biometricType,
-      shouldPromptBiometricEnroll,
-      dismissBiometricPrompt,
       signIn, signUp, signOut, updateUser,
       completeOnboarding, resendVerification, confirmEmailVerified,
       verify2FA, loginWithBiometric, enrollBiometric, disableBiometric,
       reauthenticate, setSecurityQuestions, verifySecurityAnswers, getSecurityQuestions,
-      signInWithSocial, handleOAuthCallback,
+      signInWithSocial, loadUserFromServer,
       exportData, requestAccountDeletion, cancelAccountDeletion, grantConsent,
     }}>
       {children}

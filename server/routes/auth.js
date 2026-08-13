@@ -3,6 +3,15 @@
  * Includes: register, email/phone OTP, login, 2FA, refresh, logout,
  *           reauth, recovery, reset-password, Google/LinkedIn OAuth,
  *           and biometric register/verify/disable.
+ *
+ * OAuth deep-link fix for Expo Go:
+ *   The client passes ?redirectUri=<url> when initiating OAuth.
+ *   That URL is stored in the server session so the callback can
+ *   redirect back to whatever scheme the client supports:
+ *     - Expo Go:       exp://192.168.x.x:PORT/--/oauth/callback
+ *     - Standalone:    career-assistant://oauth/callback
+ *     - Web fallback:  https://your-app.com/oauth/callback
+ *   If no redirectUri is supplied the server falls back to APP_DEEP_LINK.
  */
 const express     = require("express");
 const passport    = require("passport");
@@ -167,25 +176,94 @@ router.post("/reset-password", authLimiter, async (req, res) => {
 // Google OAuth2
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Step 1: Redirect the browser to Google's consent screen.
+/**
+ * Whitelist for the client-supplied ?redirectUri= param, to prevent this
+ * endpoint from being used as an open redirect. Only allow:
+ *   - exp://...                    (Expo Go, any LAN IP/port)
+ *   - <APP_DEEP_LINK scheme>://... (standalone build, e.g. career-assistant://)
+ *   - https://<origin in ALLOWED_ORIGINS>/... (web fallback)
+ */
+function isAllowedRedirectUri(uri) {
+  if (!uri || typeof uri !== "string") return false;
+  let parsed;
+  try {
+    parsed = new URL(uri);
+  } catch {
+    return false;
+  }
+
+  if (parsed.protocol === "exp:") return true;
+
+  const appScheme = (process.env.APP_DEEP_LINK ?? "career-assistant://").split("://")[0];
+  if (parsed.protocol === `${appScheme}:`) return true;
+
+  if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+    const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "").split(",").filter(Boolean);
+    if (allowedOrigins.includes(parsed.origin)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Step 1 — Redirect the browser to Google's consent screen.
+ *
+ * The client may pass ?redirectUri=<encoded-url> so the callback knows
+ * where to send the tokens once the OAuth dance completes.  This is required
+ * for Expo Go, which uses a dynamic exp:// scheme instead of a static custom
+ * scheme.  The redirectUri is stored in the server-side session and consumed
+ * inside the callback handler below.
+ */
+router.get("/google", (req, res, next) => {
+  // Store the client's desired redirect URI in the session so the callback
+  // can use it regardless of whether the OAuth provider preserves query params.
+  // Rejects anything not matching the whitelist to prevent open-redirect abuse.
+  if (req.query.redirectUri && isAllowedRedirectUri(req.query.redirectUri)) {
+    req.session.oauthRedirectUri = req.query.redirectUri;
+  }
+  passport.authenticate("google", {
+    session: true,
+    scope: ["openid", "profile", "email"],
+  })(req, res, next);
+});
+
+/**
+ * Step 2 — Google redirects back here with an authorisation code.
+ *
+ * After verifying the user, we redirect to:
+ *   1. The redirectUri stored in session  (Expo Go or custom dev scheme)
+ *   2. APP_DEEP_LINK env variable         (production standalone build)
+ *   3. Hardcoded fallback                 (career-assistant://)
+ *
+ * Tokens are passed as query parameters so the mobile app can extract them
+ * from the incoming URL inside the deep-link handler.
+ */
 router.get("/google/callback",
-  passport.authenticate("google", { 
-    session: true, 
-    failureRedirect: "/api/auth/oauth/error" 
-  }),
+  // keepSessionInfo: true — Passport regenerates the session on login (session-fixation
+  // protection), which by default wipes req.session.oauthRedirectUri set in step 1.
+  // This option carries the pre-login session data across the regenerate.
+  passport.authenticate("google", { session: true, keepSessionInfo: true, failureRedirect: "/api/auth/oauth/error" }),
   async (req, res) => {
     try {
       const { accessToken, refreshToken, expiresAt } = await AuthService.issueSocialSession(req.user, req);
-      
-      // ✅ FOR EXPO GO - Use Expo deep link format
-      const expoDeepLink = `exp://exp.host/@rashid011/career-assistant/--/oauth/callback?accessToken=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}&expiresAt=${expiresAt}`;
-      
-      // Redirect to Expo deep link
-      res.redirect(expoDeepLink);
-      
+
+      // Prefer the per-request redirect URI the client registered at step 1.
+      const appDeepLink =
+        req.session.oauthRedirectUri ??
+        `${process.env.APP_DEEP_LINK ?? "career-assistant://"}oauth/callback`;
+
+      // Clear it so it cannot be reused by a later OAuth flow.
+      delete req.session.oauthRedirectUri;
+
+      // Build the redirect URL; handle trailing slashes consistently.
+      const separator = appDeepLink.includes("?") ? "&" : "?";
+      const redirectUrl = `${appDeepLink}${separator}accessToken=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}&expiresAt=${expiresAt}`;
+      res.redirect(redirectUrl);
     } catch (e) {
       console.error("[OAuth/Google] Session issue error:", e);
-      res.redirect(`exp://exp.host/@rashid011/career-assistant/--/oauth/error`);
+      const fallback = req.session.oauthRedirectUri ?? `${process.env.APP_DEEP_LINK ?? "career-assistant://"}oauth/error`;
+      delete req.session.oauthRedirectUri;
+      res.redirect(fallback.includes("?") ? `${fallback}&error=auth_failed` : `${fallback}?error=auth_failed`);
     }
   }
 );
@@ -194,24 +272,41 @@ router.get("/google/callback",
 // LinkedIn OAuth2
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Step 1: Redirect to LinkedIn.
-router.get("/linkedin",
-  passport.authenticate("linkedin", { session: true })
-);
+/**
+ * Step 1 — Redirect to LinkedIn.
+ * Same redirectUri session-storage pattern as Google above.
+ */
+router.get("/linkedin", (req, res, next) => {
+  if (req.query.redirectUri && isAllowedRedirectUri(req.query.redirectUri)) {
+    req.session.oauthRedirectUri = req.query.redirectUri;
+  }
+  passport.authenticate("linkedin", { session: true })(req, res, next);
+});
 
-// Step 2: LinkedIn redirects back here.
+/**
+ * Step 2 — LinkedIn redirects back here.
+ */
 router.get("/linkedin/callback",
-  passport.authenticate("linkedin", { session: true, failureRedirect: "/api/auth/oauth/error" }),
+  // See the keepSessionInfo comment on the Google callback above — same fix applies here.
+  passport.authenticate("linkedin", { session: true, keepSessionInfo: true, failureRedirect: "/api/auth/oauth/error" }),
   async (req, res) => {
     try {
       const { accessToken, refreshToken, expiresAt } = await AuthService.issueSocialSession(req.user, req);
-      const appDeepLink = process.env.APP_DEEP_LINK ?? "career-assistant://";
-      res.redirect(
-        `${appDeepLink}oauth/callback?accessToken=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}&expiresAt=${expiresAt}`
-      );
+
+      const appDeepLink =
+        req.session.oauthRedirectUri ??
+        `${process.env.APP_DEEP_LINK ?? "career-assistant://"}oauth/callback`;
+
+      delete req.session.oauthRedirectUri;
+
+      const separator = appDeepLink.includes("?") ? "&" : "?";
+      const redirectUrl = `${appDeepLink}${separator}accessToken=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}&expiresAt=${expiresAt}`;
+      res.redirect(redirectUrl);
     } catch (e) {
       console.error("[OAuth/LinkedIn] Session issue error:", e);
-      res.redirect(`${process.env.APP_DEEP_LINK ?? "career-assistant://"}oauth/error`);
+      const fallback = req.session.oauthRedirectUri ?? `${process.env.APP_DEEP_LINK ?? "career-assistant://"}oauth/error`;
+      delete req.session.oauthRedirectUri;
+      res.redirect(fallback.includes("?") ? `${fallback}&error=auth_failed` : `${fallback}?error=auth_failed`);
     }
   }
 );
