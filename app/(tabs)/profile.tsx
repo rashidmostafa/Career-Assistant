@@ -1,6 +1,7 @@
 import { Edit2, X, LogOut, Check, Camera, Trash2, AlertTriangle, ChevronDown } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
+import { LinearGradient } from "expo-linear-gradient";
 import React, { useState } from "react";
 import {
   Alert,
@@ -304,7 +305,15 @@ export default function ProfileScreen() {
         colors={colors}
       />
 
-      <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border, backgroundColor: colors.card }]}>
+      <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}>
+        <LinearGradient
+          colors={[(colors.primary || "#2563eb") + "18", colors.card, colors.background]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.headerGradient}
+        />
+        <View style={[styles.headerBlob, styles.headerBlobOne, { backgroundColor: (colors.primary || "#2563eb") + "18" }]} />
+        <View style={[styles.headerBlob, styles.headerBlobTwo, { backgroundColor: colors.accent + "40" }]} />
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>Profile</Text>
         <TouchableOpacity style={[styles.editBtn, { backgroundColor: editing ? colors.muted : colors.accent }]} onPress={() => editing ? cancelEdit() : setEditing(true)}>
           {editing ? <X size={18} color={colors.destructive} /> : <Edit2 size={18} color={colors.primary} />}
@@ -391,7 +400,11 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth, position: "relative", overflow: "hidden" },
+  headerGradient: { ...StyleSheet.absoluteFillObject },
+  headerBlob: { position: "absolute", borderRadius: 999 },
+  headerBlobOne: { width: 140, height: 140, right: -30, top: 10 },
+  headerBlobTwo: { width: 96, height: 96, left: -20, top: 54 },
   headerTitle: { fontSize: 24, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
   editBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   avatarSection: { alignItems: "center", marginBottom: 32 },
@@ -402,19 +415,19 @@ const styles = StyleSheet.create({
   photoBtnText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   displayName: { fontSize: 24, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
   displayEmail: { fontSize: 15, fontFamily: "Inter_500Medium", marginTop: 4 },
-  card: { borderRadius: 24, padding: 24, borderWidth: 1, marginBottom: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 8, elevation: 2 },
+  card: { borderRadius: 24, padding: 24, borderWidth: 1, marginBottom: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.05, shadowRadius: 12, elevation: 2 },
   cardTitle: { fontSize: 13, fontFamily: "Inter_700Bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 20 },
   fieldRow: { marginBottom: 18 },
   fieldLabel: { fontSize: 13, fontFamily: "Inter_600SemiBold", marginBottom: 6 },
   fieldValue: { fontSize: 16, fontFamily: "Inter_500Medium" },
-  dropdownBtn: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, borderWidth: 1 },
+  dropdownBtn: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, borderWidth: 1, backgroundColor: "rgba(255,255,255,0.04)" },
   dropdownBtnText: { flex: 1, fontSize: 15, fontFamily: "Inter_500Medium" },
   warningBanner: { flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 12, borderRadius: 10, borderWidth: 1, marginTop: 4 },
   warningText: { flex: 1, fontSize: 12, fontFamily: "Inter_500Medium", lineHeight: 18 },
   statRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 },
   statValue: { fontSize: 15, fontFamily: "Inter_700Bold" },
-  saveBtn: { flexDirection: "row", alignItems: "center", gap: 10, justifyContent: "center", paddingVertical: 18, borderRadius: 16, marginBottom: 16 },
+  saveBtn: { flexDirection: "row", alignItems: "center", gap: 10, justifyContent: "center", paddingVertical: 18, borderRadius: 16, marginBottom: 16, shadowColor: "#2563eb", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.18, shadowRadius: 14, elevation: 4 },
   saveBtnText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 16 },
-  signOutBtn: { flexDirection: "row", alignItems: "center", gap: 10, justifyContent: "center", paddingVertical: 16, borderRadius: 16, borderWidth: 1 },
+  signOutBtn: { flexDirection: "row", alignItems: "center", gap: 10, justifyContent: "center", paddingVertical: 16, borderRadius: 16, borderWidth: 1, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 },
   signOutText: { fontFamily: "Inter_700Bold", fontSize: 16 },
 });

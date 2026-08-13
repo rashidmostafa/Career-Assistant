@@ -99,7 +99,7 @@ export default function CVScreen() {
 
       let extractedText = "";
       try {
-        const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+        const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: "base64" as const });
         extractedText = extractPdfTextFromBase64(base64);
       } catch {
         /* fall through to error below */

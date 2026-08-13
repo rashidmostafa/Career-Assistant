@@ -18,11 +18,27 @@ export default function TabLayout() {
         headerShown: false,
         tabBarStyle: {
           position: "absolute",
-          backgroundColor: isIOS ? "transparent" : colors.background,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderTopColor: colors.border,
+          bottom: isWeb ? 16 : 12,
+          left: 12,
+          right: 12,
+          backgroundColor: isIOS ? "transparent" : colors.background + "e6",
+          borderTopWidth: 0,
+          borderRadius: 24,
+          borderColor: colors.border + "55",
+          borderWidth: 1,
           elevation: 0,
-          height: isWeb ? 84 : 62,
+          height: isWeb ? 78 : 68,
+          paddingBottom: 6,
+          paddingTop: 6,
+          paddingHorizontal: 6,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 10 },
+          shadowOpacity: 0.14,
+          shadowRadius: 16,
+        },
+        tabBarItemStyle: {
+          borderRadius: 16,
+          paddingVertical: 4,
         },
         tabBarBackground: () =>
           isIOS ? (
@@ -30,7 +46,8 @@ export default function TabLayout() {
           ) : (
             <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background }]} />
           ),
-        tabBarLabelStyle: { fontSize: 10, fontFamily: "Inter_600SemiBold", marginBottom: 4 },
+        tabBarLabelStyle: { fontSize: 10, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
+        tabBarIconStyle: { marginTop: 2 },
       }}
     >
       <Tabs.Screen
