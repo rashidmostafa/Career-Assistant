@@ -1,7 +1,8 @@
-import { Edit2, X, LogOut, Check, Camera, Trash2, AlertTriangle, ChevronDown } from "lucide-react-native";
+import { Edit2, X, LogOut, Check, Camera, Trash2, AlertTriangle, ChevronDown, ShieldCheck, ChevronRight } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
   Alert,
@@ -144,6 +145,7 @@ function PickerModal({ visible, title, options, selected, onSelect, onClose, col
 export default function ProfileScreen() {
   const colors = useColors() as any;
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { user, signOut, updateUser } = useAuth();
   const { cvProfile, clearCV } = useCV();
   const { appliedJobIds } = useJobs();
@@ -389,6 +391,24 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         )}
 
+        <TouchableOpacity
+          style={[styles.securityRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onPress={() => router.push("/auth-security")}
+          accessibilityRole="button"
+          accessibilityLabel="Security & Privacy settings"
+        >
+          <View style={[styles.securityIcon, { backgroundColor: colors.primary + "18" }]}>
+            <ShieldCheck size={20} color={colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.securityTitle, { color: colors.foreground }]}>Security & Privacy</Text>
+            <Text style={[styles.securitySubtitle, { color: colors.mutedForeground }]}>
+              2FA, biometrics, backup codes, data export
+            </Text>
+          </View>
+          <ChevronRight size={20} color={colors.mutedForeground} />
+        </TouchableOpacity>
+
         <TouchableOpacity style={[styles.signOutBtn, { borderColor: colors.destructive, backgroundColor: colors.card }]} onPress={handleSignOut}>
           <LogOut size={20} color={colors.destructive} />
           <Text style={[styles.signOutText, { color: colors.destructive }]}>Sign Out</Text>
@@ -428,6 +448,10 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 15, fontFamily: "Inter_700Bold" },
   saveBtn: { flexDirection: "row", alignItems: "center", gap: 10, justifyContent: "center", paddingVertical: 18, borderRadius: 16, marginBottom: 16, shadowColor: "#2563eb", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.18, shadowRadius: 14, elevation: 4 },
   saveBtnText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 16 },
+  securityRow: { flexDirection: "row", alignItems: "center", gap: 14, padding: 18, borderRadius: 20, borderWidth: 1, marginBottom: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 },
+  securityIcon: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  securityTitle: { fontSize: 15, fontFamily: "Inter_700Bold" },
+  securitySubtitle: { fontSize: 12, fontFamily: "Inter_500Medium", marginTop: 2 },
   signOutBtn: { flexDirection: "row", alignItems: "center", gap: 10, justifyContent: "center", paddingVertical: 16, borderRadius: 16, borderWidth: 1, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 },
   signOutText: { fontFamily: "Inter_700Bold", fontSize: 16 },
 });

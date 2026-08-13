@@ -39,11 +39,10 @@ const UserSchema = new mongoose.Schema({
   emailVerified:        { type: Boolean, default: false },
   emailVerifyToken:     { type: String },
   emailVerifyExpires:   { type: Date },
-  phoneVerified:        { type: Boolean, default: false },
 
   // ── 2FA ───────────────────────────────────────────────────────────────────
   twoFactorEnabled:  { type: Boolean, default: false },
-  twoFactorMethod:   { type: String, enum: ["totp", "sms", "email"], default: "totp" },
+  twoFactorMethod:   { type: String, enum: ["totp", "email"], default: "totp" },
   totpSecret:        { type: String, select: false },
   backupCodes:       { type: [String], select: false },
 
@@ -125,6 +124,9 @@ UserSchema.methods.isDeviceTrusted = function (deviceId) {
 
 UserSchema.methods.toSafeObject = function () {
   const obj = this.toObject();
+  // Expose only the count, never the actual codes — only populated when the
+  // caller's query explicitly selected +backupCodes (it's select:false by default).
+  if (Array.isArray(obj.backupCodes)) obj.backupCodesRemaining = obj.backupCodes.length;
   delete obj.passwordHash;
   delete obj.totpSecret;
   delete obj.backupCodes;

@@ -93,8 +93,17 @@ export interface AuthTokens {
 
 export interface AuthResponse extends AuthTokens {
   user: any;
-  require2FA?: boolean;
+  require2FA?: false;
   requireReauth?: boolean;
+  riskScore?: number;
+  riskLevel?: string;
+}
+
+/** Returned by login() instead of AuthResponse when 2FA must be completed first — no tokens yet. */
+export interface TwoFactorRequiredResponse {
+  require2FA: true;
+  userId: string;
+  method: string;
   riskScore?: number;
   riskLevel?: string;
 }
@@ -120,14 +129,9 @@ export const AuthApiService = {
     return apiFetch("/api/auth/verify-email", { method: "POST", body: JSON.stringify(payload) });
   },
 
-  async sendPhoneOtp(payload: { phone: string }): Promise<{ message: string }> {
+  async resendVerificationEmail(payload: { userId: string }): Promise<{ message: string }> {
     if (!BASE) throw new Error("NO_BACKEND");
-    return apiFetch("/api/auth/send-phone-otp", { method: "POST", body: JSON.stringify(payload) });
-  },
-
-  async verifyPhoneOtp(payload: { phone: string; otp: string }): Promise<{ message: string }> {
-    if (!BASE) throw new Error("NO_BACKEND");
-    return apiFetch("/api/auth/verify-phone", { method: "POST", body: JSON.stringify(payload) });
+    return apiFetch("/api/auth/resend-verification", { method: "POST", body: JSON.stringify(payload) });
   },
 
   // ── Login ─────────────────────────────────────────────────────────────────────
@@ -135,7 +139,7 @@ export const AuthApiService = {
     email: string;
     password: string;
     deviceId?: string;
-  }): Promise<AuthResponse> {
+  }): Promise<AuthResponse | TwoFactorRequiredResponse> {
     if (!BASE) throw new Error("NO_BACKEND");
     return apiFetch("/api/auth/login", { method: "POST", body: JSON.stringify(payload) });
   },
@@ -144,7 +148,7 @@ export const AuthApiService = {
   async verify2FA(payload: {
     userId: string;
     code: string;
-    method: "totp" | "sms" | "email" | "backup";
+    method: "totp" | "email" | "backup";
     trustDevice?: boolean;
   }): Promise<AuthResponse> {
     if (!BASE) throw new Error("NO_BACKEND");
@@ -156,9 +160,14 @@ export const AuthApiService = {
     return apiFetch("/api/auth/2fa/resend", { method: "POST", body: JSON.stringify(payload) });
   },
 
-  async setup2FA(): Promise<{ secret: string; qrCode: string | null; otpauthUrl: string }> {
+  async setup2FA(): Promise<{ qrUri: string; qrDataUri: string | null; secret: string; backupCodes: string[] }> {
     if (!BASE) throw new Error("NO_BACKEND");
     return apiFetch("/api/auth/2fa/setup", { method: "POST" }, true);
+  },
+
+  async setup2FAOtp(method: "email"): Promise<{ method: string; backupCodes: string[] }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/auth/2fa/setup-otp", { method: "POST", body: JSON.stringify({ method }) }, true);
   },
 
   async disable2FA(code: string): Promise<{ message: string }> {
@@ -179,9 +188,10 @@ export const AuthApiService = {
 
   // ── Reauth ────────────────────────────────────────────────────────────────────
   async reauth(payload: {
-    method: "password" | "security_questions";
+    method: "password" | "security_questions" | "biometric";
     credential?: string;
     answers?: Array<{ question: string; answer: string }>;
+    biometricToken?: string;
   }): Promise<AuthResponse> {
     if (!BASE) throw new Error("NO_BACKEND");
     return apiFetch("/api/auth/reauth", { method: "POST", body: JSON.stringify(payload) }, true);
@@ -261,6 +271,11 @@ export const AuthApiService = {
       { method: "POST", body: JSON.stringify({ questions }) },
       true
     );
+  },
+
+  async getSecurityQuestions(): Promise<{ questions: string[] }> {
+    if (!BASE) throw new Error("NO_BACKEND");
+    return apiFetch("/api/user/security-questions", {}, true);
   },
 
   // ── GDPR ──────────────────────────────────────────────────────────────────────

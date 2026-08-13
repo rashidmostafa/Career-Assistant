@@ -2,16 +2,17 @@
  * AuthContext — Full authentication state management.
  * Backward-compatible: still exports User, useAuth, AuthProvider with
  * the same signIn / signUp / signOut / updateUser / completeOnboarding /
- * resendVerification / confirmEmailVerified interface used by existing screens.
+ * resendVerification / confirmEmailVerified interface used by existing screens
+ * (confirmEmailVerified now takes the OTP code — see below).
  *
- * New additions:
- *  - 2FA state & helpers
- *  - Biometric login
- *  - 8-week rolling session + re-auth urgency
- *  - Risk scoring
- *  - Security questions
- *  - GDPR helpers
- *  - Account lockout
+ * All auth actions are backed by the real server (server/services/authService.js):
+ *  - Registration/login/2FA/recovery/security-questions/GDPR all go through
+ *    AuthApiService, which enforces real email-domain validation (disposable-
+ *    domain blocklist + DNS MX lookup) and sends real OTP emails. There is no
+ *    local/offline simulation fallback for these — if the server is unreachable,
+ *    the action fails with a clear error rather than silently succeeding.
+ *  - The 8-week rolling session clock, biometric hardware checks, and OTP
+ *    countdown timers remain client-side (they don't need a server round-trip).
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, {
@@ -25,13 +26,13 @@ import React, {
 import { AppState, AppStateStatus } from "react-native";
 import { SessionManager, type ReauthUrgency } from "@/services/sessionManager";
 import { BiometricService } from "@/services/biometricService";
-import { RiskScoringService, type RiskLevel } from "@/services/riskScoring";
-import { OtpService } from "@/services/otpService";
+import { AuthApiService } from "@/services/authApiService";
+import type { RiskLevel } from "@/services/riskScoring";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 export interface SecurityQuestion {
   question: string;
-  answer: string; // hashed on server; stored locally as hint only
+  answer: string; // hashed on server; never stored in plaintext client-side
 }
 
 export interface User {
@@ -47,7 +48,8 @@ export interface User {
   photoUri?: string;
   // Security
   twoFactorEnabled: boolean;
-  twoFactorMethod?: "totp" | "sms" | "email";
+  twoFactorMethod?: "totp" | "email";
+  backupCodesRemaining?: number;
   biometricEnabled: boolean;
   securityQuestionsSet: boolean;
   // Lockout
@@ -76,15 +78,16 @@ export interface AuthContextType {
   biometricAvailable: boolean;
   biometricType: "FaceID" | "Fingerprint" | "None";
   // ── Legacy API (backward compat) ────────────────────────────────────────────
-  signIn: (email: string, password: string) => Promise<{ require2FA?: boolean; userId?: string }>;
+  signIn: (email: string, password: string) => Promise<{ require2FA?: boolean; userId?: string; method?: string }>;
   signUp: (data: { name: string; email: string; password: string; phone?: string }) => Promise<void>;
   signOut: () => Promise<void>;
   updateUser: (data: Partial<User>) => Promise<void>;
   completeOnboarding: (background: string, experienceLevel: string, targetRole: string) => Promise<void>;
   resendVerification: () => Promise<void>;
-  confirmEmailVerified: () => Promise<void>;
+  /** Verifies the OTP the user typed in against the server and, on success, signs them in. */
+  confirmEmailVerified: (otp: string) => Promise<void>;
   // ── New auth API ─────────────────────────────────────────────────────────────
-  verify2FA: (code: string, method: "totp" | "sms" | "email" | "backup", trustDevice?: boolean) => Promise<void>;
+  verify2FA: (code: string, method: "totp" | "email" | "backup", trustDevice?: boolean) => Promise<void>;
   loginWithBiometric: () => Promise<boolean>;
   enrollBiometric: () => Promise<boolean>;
   disableBiometric: () => Promise<void>;
@@ -102,48 +105,45 @@ export interface AuthContextType {
   grantConsent: () => Promise<void>;
 }
 
-// ─── Constants ─────────────────────────────────────────────────────────────────
-const MAX_LOGIN_ATTEMPTS = 5;
-const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
-
 const STORE = {
-  USER:         "auth_user_v2",
-  USERS:        "auth_users_v2",
+  USER:          "auth_user_v2",
   PENDING_EMAIL: "auth_pending_email",
-  PENDING_USER: "auth_pending_user",
-  SECURITY_Q:   "auth_security_questions",
-  REAUTH_TS:    "auth_last_reauth_ts",
+  PENDING_USER_ID: "auth_pending_user_id",
 } as const;
 
 // ─── Context ───────────────────────────────────────────────────────────────────
 const AuthContext = createContext<AuthContextType | null>(null);
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
-function generateId() {
-  return `u_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function simpleHash(str: string): string {
-  // Deterministic client-side hash (NOT cryptographic — for local sim only)
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) h = (h * 33) ^ str.charCodeAt(i);
-  return (h >>> 0).toString(16);
-}
-
-function makeDefaultUser(partial: Partial<User>): User {
+/** Normalises a raw server user document (Mongo `_id`, date strings, …) into our client `User` shape. */
+function mapServerUser(raw: any): User {
+  const toMs = (v: any): number | undefined => {
+    if (!v) return undefined;
+    const t = new Date(v).getTime();
+    return Number.isNaN(t) ? undefined : t;
+  };
   return {
-    id: generateId(),
-    name: "",
-    email: "",
-    targetRole: "",
-    experienceLevel: "",
-    twoFactorEnabled: false,
-    biometricEnabled: false,
-    securityQuestionsSet: false,
-    loginAttempts: 0,
-    accountLocked: false,
-    consentGiven: false,
-    ...partial,
+    id:    raw._id?.toString?.() ?? raw.id ?? "",
+    name:  raw.name ?? "",
+    email: raw.email ?? "",
+    phone: raw.phone,
+    targetRole:       raw.targetRole ?? "",
+    experienceLevel:  raw.experienceLevel ?? "",
+    background:       raw.background,
+    onboardingComplete: raw.onboardingComplete ?? false,
+    emailVerified:      raw.emailVerified ?? false,
+    photoUri:           raw.photoUri ?? raw.avatarUrl,
+    twoFactorEnabled:   raw.twoFactorEnabled ?? false,
+    twoFactorMethod:    raw.twoFactorMethod,
+    backupCodesRemaining: typeof raw.backupCodesRemaining === "number" ? raw.backupCodesRemaining : undefined,
+    biometricEnabled:      raw.biometricEnabled ?? false,
+    securityQuestionsSet:  raw.securityQuestionsSet ?? false,
+    loginAttempts: raw.loginAttempts ?? 0,
+    accountLocked: raw.accountLocked ?? false,
+    lockoutUntil:  toMs(raw.lockoutUntil),
+    lastLogin:     toMs(raw.lastLogin),
+    consentGiven:  raw.consentGiven ?? false,
+    deletionScheduledAt: toMs(raw.deletionScheduledAt),
   };
 }
 
@@ -161,28 +161,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [biometricType, setBiometricType] = useState<"FaceID" | "Fingerprint" | "None">("None");
 
   const sessionTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Kept in memory only (never persisted) so we can auto-login right after the
+  // user verifies their email OTP — the server's verify-email endpoint only
+  // marks the account verified, it doesn't issue a session by itself.
+  const pendingPasswordRef = useRef<string | null>(null);
 
   // ── Startup ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
-      const [rawUser, pendingEmail] = await Promise.all([
-        AsyncStorage.getItem(STORE.USER),
-        AsyncStorage.getItem(STORE.PENDING_EMAIL),
-      ]);
-      if (rawUser) {
-        const u: User = JSON.parse(rawUser);
-        setUser(u);
-        // Check lockout expiry
-        if (u.accountLocked && u.lockoutUntil && Date.now() > u.lockoutUntil) {
-          const unlocked = { ...u, accountLocked: false, loginAttempts: 0, lockoutUntil: undefined };
-          await persistUser(unlocked);
+      try {
+        const accessToken = await SessionManager.getAccessToken();
+        if (accessToken) {
+          try {
+            const profile = await AuthApiService.getProfile();
+            if (profile?.user) await persistUser(mapServerUser(profile.user));
+          } catch {
+            // Server unreachable — fall back to the last cached profile so the
+            // app stays usable offline. A stale cache beats a blank screen.
+            const rawUser = await AsyncStorage.getItem(STORE.USER);
+            if (rawUser) setUser(JSON.parse(rawUser));
+          }
         }
+        const [pendingEmail, pendingId] = await Promise.all([
+          AsyncStorage.getItem(STORE.PENDING_EMAIL),
+          AsyncStorage.getItem(STORE.PENDING_USER_ID),
+        ]);
+        if (pendingEmail) setPendingVerificationEmail(pendingEmail);
+        if (pendingId) setPendingUserId(pendingId);
+      } finally {
+        setIsLoading(false);
       }
-      if (pendingEmail) setPendingVerificationEmail(pendingEmail);
-      setIsLoading(false);
     })();
 
-    // Biometric check
+    // Biometric hardware check
     BiometricService.getAvailability().then(({ available, type }) => {
       setBiometricAvailable(available);
       setBiometricType(type);
@@ -217,268 +228,152 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSessionDaysRemaining(days);
   }
 
-  // ── Persistence helpers ───────────────────────────────────────────────────────
+  // ── Persistence helper ─────────────────────────────────────────────────────────
+  // The server is the source of truth; AsyncStorage just caches the last known
+  // profile so the app has something to show while offline.
   async function persistUser(u: User) {
     await AsyncStorage.setItem(STORE.USER, JSON.stringify(u));
     setUser(u);
-    // Update in users list
-    const raw = await AsyncStorage.getItem(STORE.USERS);
-    const users: StoredUser[] = raw ? JSON.parse(raw) : [];
-    const idx = users.findIndex((x) => x.id === u.id);
-    if (idx >= 0) users[idx] = { ...users[idx], ...u };
-    await AsyncStorage.setItem(STORE.USERS, JSON.stringify(users));
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // signIn (backward-compatible, also handles risk + lockout)
+  // signIn
   // ─────────────────────────────────────────────────────────────────────────────
   const signIn = useCallback(async (email: string, password: string) => {
-    const raw = await AsyncStorage.getItem(STORE.USERS);
-    const users: StoredUser[] = raw ? JSON.parse(raw) : [];
-    const found = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-    if (!found) throw new Error("No account found with that email.");
+    const result = await AuthApiService.login({ email, password });
 
-    // Lockout check
-    if (found.accountLocked) {
-      if (found.lockoutUntil && Date.now() < found.lockoutUntil) {
-        const mins = Math.ceil((found.lockoutUntil - Date.now()) / 60_000);
-        throw new Error(`Account locked. Try again in ${mins} minute${mins !== 1 ? "s" : ""}.`);
-      }
-      found.accountLocked = false;
-      found.loginAttempts = 0;
+    if (result.require2FA) {
+      setPending2FAUserId(result.userId);
+      return { require2FA: true, userId: result.userId, method: result.method };
     }
 
-    // Password check (local sim: compare hash)
-    if (found.passwordHash && simpleHash(password) !== found.passwordHash) {
-      found.loginAttempts = (found.loginAttempts ?? 0) + 1;
-      await RiskScoringService.recordAttempt(found.id, false);
-      if (found.loginAttempts >= MAX_LOGIN_ATTEMPTS) {
-        found.accountLocked = true;
-        found.lockoutUntil  = Date.now() + LOCKOUT_MS;
-        const idx = users.findIndex((u) => u.id === found.id);
-        if (idx >= 0) users[idx] = found;
-        await AsyncStorage.setItem(STORE.USERS, JSON.stringify(users));
-        throw new Error(`Account locked for 15 minutes after ${MAX_LOGIN_ATTEMPTS} failed attempts.`);
-      }
-      const idx = users.findIndex((u) => u.id === found.id);
-      if (idx >= 0) users[idx] = found;
-      await AsyncStorage.setItem(STORE.USERS, JSON.stringify(users));
-      throw new Error(`Incorrect password. ${MAX_LOGIN_ATTEMPTS - found.loginAttempts} attempt${MAX_LOGIN_ATTEMPTS - found.loginAttempts !== 1 ? "s" : ""} remaining.`);
-    }
-
-    // Risk scoring
-    const deviceId = await SessionManager.getOrCreateDeviceId();
-    const knownDevices: string[] = found.knownDevices ?? [];
-    const recentFailures = await RiskScoringService.getRecentFailures();
-    const risk = await RiskScoringService.calculate({
-      deviceId,
-      knownDeviceIds: knownDevices,
-      recentFailures,
-      timeSinceLastLogin: found.lastLogin ? Date.now() - found.lastLogin : undefined,
-    });
-    setRiskLevel(risk.level);
-
-    // Record successful attempt
-    await RiskScoringService.recordAttempt(found.id, true);
-    // Add device to known
-    if (!knownDevices.includes(deviceId)) knownDevices.push(deviceId);
-
-    // Reset login attempts
-    found.loginAttempts = 0;
-    found.accountLocked = false;
-    found.lastLogin = Date.now();
-    found.knownDevices = knownDevices;
-    const idx = users.findIndex((u) => u.id === found.id);
-    if (idx >= 0) users[idx] = found;
-    await AsyncStorage.setItem(STORE.USERS, JSON.stringify(users));
-
-    // Check device trust + 2FA
-    const trusted = await SessionManager.isDeviceTrusted();
-    if (found.twoFactorEnabled && !trusted && !risk.require2FA === false) {
-      // Also require 2FA when risk is HIGH/CRITICAL regardless of user setting
-    }
-
-    if (found.twoFactorEnabled && !trusted) {
-      // Need 2FA — set pending state
-      setPending2FAUserId(found.id);
-      await AsyncStorage.setItem("auth_pending_2fa_user", JSON.stringify(found));
-      return { require2FA: true, userId: found.id };
-    }
-
-    // Complete login
-    const { passwordHash: _ph, knownDevices: _kd, ...safeUser } = found;
-    const finalUser: User = safeUser;
-    await persistUser(finalUser);
-
-    // Issue local tokens
     await SessionManager.saveTokens({
-      accessToken:  `local_at_${generateId()}`,
-      refreshToken: `local_rt_${generateId()}`,
-      expiresAt:    Date.now() + 15 * 60 * 1000,
+      accessToken:  result.accessToken,
+      refreshToken: result.refreshToken,
+      expiresAt:    result.expiresAt,
     });
-
-    // Biometric credential sync
-    if (finalUser.biometricEnabled) {
-      await BiometricService.saveCredential(finalUser.id, `bio_${finalUser.id}`);
-    }
+    if (result.riskLevel) setRiskLevel(result.riskLevel as RiskLevel);
+    await persistUser(mapServerUser(result.user));
 
     setPendingVerificationEmail(null);
+    setPendingUserId(null);
     await AsyncStorage.removeItem(STORE.PENDING_EMAIL);
+    await AsyncStorage.removeItem(STORE.PENDING_USER_ID);
     return {};
   }, []);
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // signUp
+  // signUp — real server registration. The server validates the email domain
+  // (rejects disposable addresses and domains with no MX records) and emails a
+  // real OTP; there is no local fallback that would let a fake address through.
   // ─────────────────────────────────────────────────────────────────────────────
   const signUp = useCallback(async (data: {
     name: string; email: string; password: string; phone?: string;
   }) => {
-    const raw = await AsyncStorage.getItem(STORE.USERS);
-    const users: StoredUser[] = raw ? JSON.parse(raw) : [];
-    if (users.find((u) => u.email.toLowerCase() === data.email.toLowerCase())) {
-      throw new Error("An account with this email already exists.");
-    }
-
-    const newUser: StoredUser = {
-      ...makeDefaultUser({
-        name: data.name,
-        email: data.email,
-        phone: data.phone,
-      }),
-      passwordHash: simpleHash(data.password),
-      emailVerified: false,
-      onboardingComplete: false,
-    };
-
-    users.push(newUser);
-    await AsyncStorage.setItem(STORE.USERS, JSON.stringify(users));
-
-    // Create + store OTP
-    const otp = await OtpService.createOtp(`email_verify_${newUser.id}`);
-    console.log(`[DEV] Email OTP for ${data.email}: ${otp}`); // visible in dev logs
-
-    setPendingVerificationEmail(data.email);
-    setPendingUserId(newUser.id);
-    await AsyncStorage.setItem(STORE.PENDING_EMAIL, data.email);
-    await AsyncStorage.setItem(STORE.PENDING_USER, JSON.stringify(newUser));
-  }, []);
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // confirmEmailVerified (backward-compat: called after OTP check)
-  // ─────────────────────────────────────────────────────────────────────────────
-  const confirmEmailVerified = useCallback(async () => {
-    const raw = await AsyncStorage.getItem(STORE.PENDING_USER);
-    if (!raw) return;
-    const pending: StoredUser = JSON.parse(raw);
-    const verifiedUser: User = {
-      ...pending,
-      emailVerified: true,
-      twoFactorEnabled: pending.twoFactorEnabled ?? false,
-      biometricEnabled: pending.biometricEnabled ?? false,
-      securityQuestionsSet: pending.securityQuestionsSet ?? false,
-      loginAttempts: 0,
-      accountLocked: false,
-    };
-
-    const usersRaw = await AsyncStorage.getItem(STORE.USERS);
-    const users: StoredUser[] = usersRaw ? JSON.parse(usersRaw) : [];
-    const idx = users.findIndex((u) => u.id === verifiedUser.id);
-    if (idx >= 0) users[idx] = { ...users[idx], ...verifiedUser };
-    await AsyncStorage.setItem(STORE.USERS, JSON.stringify(users));
-    await AsyncStorage.setItem(STORE.USER, JSON.stringify(verifiedUser));
-    await AsyncStorage.removeItem(STORE.PENDING_EMAIL);
-    await AsyncStorage.removeItem(STORE.PENDING_USER);
-
-    await SessionManager.saveTokens({
-      accessToken:  `local_at_${generateId()}`,
-      refreshToken: `local_rt_${generateId()}`,
-      expiresAt:    Date.now() + 15 * 60 * 1000,
+    const result = await AuthApiService.register({
+      name: data.name,
+      email: data.email,
+      password: data.password,
+      phone: data.phone,
     });
 
-    setUser(verifiedUser);
+    pendingPasswordRef.current = data.password;
+    setPendingVerificationEmail(data.email);
+    setPendingUserId(result.userId);
+    await AsyncStorage.setItem(STORE.PENDING_EMAIL, data.email);
+    await AsyncStorage.setItem(STORE.PENDING_USER_ID, result.userId);
+  }, []);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // confirmEmailVerified — verifies the OTP against the server, then auto-signs
+  // the user in using the password remembered from signUp (never persisted).
+  // ─────────────────────────────────────────────────────────────────────────────
+  const confirmEmailVerified = useCallback(async (otp: string) => {
+    const userId = pendingUserId;
+    if (!userId) throw new Error("Session expired. Please register again.");
+
+    await AuthApiService.verifyEmailOtp({ userId, otp });
+
+    const email    = pendingVerificationEmail;
+    const password = pendingPasswordRef.current;
+    if (email && password) {
+      const loginResult = await AuthApiService.login({ email, password });
+      if (!loginResult.require2FA) {
+        await SessionManager.saveTokens({
+          accessToken:  loginResult.accessToken,
+          refreshToken: loginResult.refreshToken,
+          expiresAt:    loginResult.expiresAt,
+        });
+        await persistUser(mapServerUser(loginResult.user));
+      }
+    }
+
+    pendingPasswordRef.current = null;
     setPendingVerificationEmail(null);
     setPendingUserId(null);
-  }, []);
+    await AsyncStorage.removeItem(STORE.PENDING_EMAIL);
+    await AsyncStorage.removeItem(STORE.PENDING_USER_ID);
+  }, [pendingUserId, pendingVerificationEmail]);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // resendVerification
   // ─────────────────────────────────────────────────────────────────────────────
   const resendVerification = useCallback(async () => {
-    const raw = await AsyncStorage.getItem(STORE.PENDING_USER);
-    if (!raw) return;
-    const pending: StoredUser = JSON.parse(raw);
-    const otp = await OtpService.createOtp(`email_verify_${pending.id}`);
-    console.log(`[DEV] Resent OTP for ${pending.email}: ${otp}`);
-  }, []);
+    if (!pendingUserId) return;
+    await AuthApiService.resendVerificationEmail({ userId: pendingUserId });
+  }, [pendingUserId]);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // 2FA verification
   // ─────────────────────────────────────────────────────────────────────────────
   const verify2FA = useCallback(async (
     code: string,
-    method: "totp" | "sms" | "email" | "backup",
+    method: "totp" | "email" | "backup",
     trustDevice = false,
   ) => {
-    const rawPending = await AsyncStorage.getItem("auth_pending_2fa_user");
-    const pending: StoredUser | null = rawPending ? JSON.parse(rawPending) : null;
-    const userId = pending2FAUserId ?? pending?.id;
+    const userId = pending2FAUserId;
     if (!userId) throw new Error("No pending 2FA session.");
 
-    let valid = false;
-    if (method === "backup") {
-      valid = await OtpService.verifyBackupCode(userId, code);
-    } else if (method === "totp") {
-      valid = await OtpService.verifyTotp(userId, code);
-    } else {
-      const res = await OtpService.verifyOtp(`2fa_${method}_${userId}`, code);
-      valid = res.valid;
-      if (!res.valid) throw new Error(res.error ?? "Invalid code.");
-    }
-
-    if (!valid) throw new Error("Invalid 2FA code.");
-
-    if (trustDevice) await SessionManager.trustDevice();
-
-    // Complete login
-    if (!pending) throw new Error("Session data lost. Please log in again.");
-    const { passwordHash: _ph, knownDevices: _kd, ...safeUser } = pending;
-    const finalUser: User = { ...safeUser, twoFactorEnabled: true };
-    await persistUser(finalUser);
+    const result = await AuthApiService.verify2FA({ userId, code, method, trustDevice });
 
     await SessionManager.saveTokens({
-      accessToken:  `local_at_${generateId()}`,
-      refreshToken: `local_rt_${generateId()}`,
-      expiresAt:    Date.now() + 15 * 60 * 1000,
+      accessToken:  result.accessToken,
+      refreshToken: result.refreshToken,
+      expiresAt:    result.expiresAt,
     });
+    if (trustDevice) await SessionManager.trustDevice();
+    await persistUser(mapServerUser(result.user));
 
     setPending2FAUserId(null);
-    await AsyncStorage.removeItem("auth_pending_2fa_user");
   }, [pending2FAUserId]);
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Biometric
+  // Biometric — credential lives on-device (SecureStore); the hash + userId are
+  // exchanged with the server for a real session, same as password login.
   // ─────────────────────────────────────────────────────────────────────────────
   const loginWithBiometric = useCallback(async (): Promise<boolean> => {
-    const raw = await AsyncStorage.getItem(STORE.USER);
-    const storedUser: User | null = raw ? JSON.parse(raw) : null;
-    if (!storedUser?.biometricEnabled || !storedUser.id) return false;
-    const token = await BiometricService.biometricLogin(storedUser.id);
-    if (!token) return false;
-    storedUser.lastLogin = Date.now();
-    await persistUser(storedUser);
-    await SessionManager.saveTokens({
-      accessToken:  `local_at_${generateId()}`,
-      refreshToken: `local_rt_${generateId()}`,
-      expiresAt:    Date.now() + 15 * 60 * 1000,
-    });
-    return true;
+    try {
+      const credential = await BiometricService.biometricLogin();
+      if (!credential) return false;
+      const result = await AuthApiService.verifyBiometric(credential.userId, credential.credentialIdHash);
+      await SessionManager.saveTokens({
+        accessToken:  result.accessToken,
+        refreshToken: result.refreshToken,
+        expiresAt:    result.expiresAt,
+      });
+      await persistUser(mapServerUser(result.user));
+      return true;
+    } catch {
+      return false;
+    }
   }, []);
 
   const enrollBiometric = useCallback(async (): Promise<boolean> => {
     if (!user) return false;
-    const success = await BiometricService.authenticate("Enroll biometric for sign-in");
-    if (!success) return false;
-    await BiometricService.saveCredential(user.id, `bio_${user.id}`);
+    const credentialId = `${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const result = await BiometricService.saveCredential(credentialId, user.id);
+    if (!result) return false;
+    await AuthApiService.registerBiometric(result.hash);
     await persistUser({ ...user, biometricEnabled: true });
     return true;
   }, [user]);
@@ -486,11 +381,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const disableBiometric = useCallback(async () => {
     if (!user) return;
     await BiometricService.clearCredential(user.id);
+    await AuthApiService.disableBiometric();
     await persistUser({ ...user, biometricEnabled: false });
   }, [user]);
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Re-authentication
+  // Re-authentication — always round-trips to the server so its 8-week session
+  // clock (used to validate refresh tokens) stays in sync with the local one.
   // ─────────────────────────────────────────────────────────────────────────────
   const reauthenticate = useCallback(async (
     method: "biometric" | "password" | "security_questions",
@@ -498,36 +395,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   ): Promise<boolean> => {
     if (!user) return false;
 
-    if (method === "biometric") {
-      const ok = await BiometricService.authenticateForReauth();
-      if (ok) {
-        await SessionManager.resetSessionClock();
-        await AsyncStorage.setItem(STORE.REAUTH_TS, String(Date.now()));
-        setReauthUrgency("none");
-        setSessionDaysRemaining(56);
+    try {
+      let result;
+      if (method === "biometric") {
+        const ok = await BiometricService.authenticateForReauth();
+        if (!ok) return false;
+        result = await AuthApiService.reauth({ method: "biometric", biometricToken: "device-confirmed" });
+      } else if (method === "password" && typeof credential === "string") {
+        result = await AuthApiService.reauth({ method: "password", credential });
+      } else if (method === "security_questions" && Array.isArray(credential)) {
+        result = await AuthApiService.reauth({ method: "security_questions", answers: credential });
+      } else {
+        return false;
       }
-      return ok;
-    }
 
-    if (method === "password" && typeof credential === "string") {
-      const raw = await AsyncStorage.getItem(STORE.USERS);
-      const users: StoredUser[] = raw ? JSON.parse(raw) : [];
-      const stored = users.find((u) => u.id === user.id);
-      if (!stored?.passwordHash) return false;
-      const ok = simpleHash(credential) === stored.passwordHash;
-      if (ok) {
-        await SessionManager.resetSessionClock();
-        setReauthUrgency("none");
-        setSessionDaysRemaining(56);
-      }
-      return ok;
+      await SessionManager.saveTokens({
+        accessToken:  result.accessToken,
+        refreshToken: result.refreshToken,
+        expiresAt:    result.expiresAt,
+      });
+      await SessionManager.resetSessionClock();
+      setReauthUrgency("none");
+      setSessionDaysRemaining(56);
+      return true;
+    } catch {
+      return false;
     }
-
-    if (method === "security_questions" && Array.isArray(credential)) {
-      return verifySecurityAnswers(credential);
-    }
-
-    return false;
   }, [user]);
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -535,42 +428,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ─────────────────────────────────────────────────────────────────────────────
   const setSecurityQuestions = useCallback(async (questions: SecurityQuestion[]) => {
     if (!user) return;
-    const hashed = questions.map((q) => ({ question: q.question, answerHash: simpleHash(q.answer.toLowerCase().trim()) }));
-    await AsyncStorage.setItem(`${STORE.SECURITY_Q}_${user.id}`, JSON.stringify(hashed));
+    await AuthApiService.setSecurityQuestions(questions);
     await persistUser({ ...user, securityQuestionsSet: true });
   }, [user]);
 
   const getSecurityQuestions = useCallback(async (): Promise<string[]> => {
-    if (!user) return [];
-    const raw = await AsyncStorage.getItem(`${STORE.SECURITY_Q}_${user.id}`);
-    if (!raw) return [];
-    const stored: Array<{ question: string; answerHash: string }> = JSON.parse(raw);
-    return stored.map((s) => s.question);
-  }, [user]);
+    try {
+      const { questions } = await AuthApiService.getSecurityQuestions();
+      return questions;
+    } catch {
+      return [];
+    }
+  }, []);
 
   const verifySecurityAnswers = useCallback(async (
     answers: Array<{ question: string; answer: string }>,
   ): Promise<boolean> => {
-    const userId = user?.id ?? pending2FAUserId;
-    if (!userId) return false;
-    const raw = await AsyncStorage.getItem(`${STORE.SECURITY_Q}_${userId}`);
-    if (!raw) return false;
-    const stored: Array<{ question: string; answerHash: string }> = JSON.parse(raw);
-    const allCorrect = answers.every((a) => {
-      const match = stored.find((s) => s.question === a.question);
-      return match && simpleHash(a.answer.toLowerCase().trim()) === match.answerHash;
-    });
-    if (allCorrect) {
-      await SessionManager.resetSessionClock();
-      setReauthUrgency("none");
-    }
-    return allCorrect;
-  }, [user, pending2FAUserId]);
+    return reauthenticate("security_questions", answers);
+  }, [reauthenticate]);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // signOut
   // ─────────────────────────────────────────────────────────────────────────────
   const signOut = useCallback(async () => {
+    try {
+      const refreshToken = await SessionManager.getRefreshToken();
+      if (refreshToken) await AuthApiService.logout(refreshToken);
+    } catch {
+      // Best-effort — still clear local state even if the server is unreachable.
+    }
+    pendingPasswordRef.current = null;
     await SessionManager.clearTokens();
     await AsyncStorage.removeItem(STORE.USER);
     setUser(null);
@@ -584,6 +471,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const updateUser = useCallback(async (data: Partial<User>) => {
     if (!user) return;
     await persistUser({ ...user, ...data });
+
+    // Sync only the fields the server's profile endpoint actually accepts.
+    const { name, phone, targetRole, experienceLevel, background, photoUri, onboardingComplete } = data;
+    const profileFields = { name, phone, targetRole, experienceLevel, background, photoUri, onboardingComplete };
+    if (Object.values(profileFields).some((v) => v !== undefined)) {
+      try {
+        await AuthApiService.updateProfile(profileFields);
+      } catch (e) {
+        console.warn("[AuthContext] Failed to sync profile update to server:", e);
+      }
+    }
   }, [user]);
 
   const completeOnboarding = useCallback(async (
@@ -591,9 +489,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   ) => {
     if (!user) return;
     await persistUser({ ...user, background, experienceLevel, targetRole, onboardingComplete: true });
-    // Sync to MongoDB so Google/LinkedIn sign-in doesn't reset onboarding state
     try {
-      const { AuthApiService } = await import("@/services/authApiService");
       await AuthApiService.updateProfile({ background, experienceLevel, targetRole, onboardingComplete: true });
     } catch (e) {
       console.warn("[AuthContext] Failed to sync onboarding to server:", e);
@@ -605,62 +501,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ─────────────────────────────────────────────────────────────────────────────
   const exportData = useCallback(async (): Promise<object> => {
     if (!user) throw new Error("Not authenticated");
-    const raw = await AsyncStorage.getItem(STORE.USERS);
-    const users: StoredUser[] = raw ? JSON.parse(raw) : [];
-    const { passwordHash: _ph, ...safe } = users.find((u) => u.id === user.id) ?? {};
-    return {
-      exportedAt: new Date().toISOString(),
-      user: safe,
-      gdprNote: "This export contains all personal data held for your account.",
-    };
+    return AuthApiService.exportData();
   }, [user]);
 
   const requestAccountDeletion = useCallback(async () => {
     if (!user) return;
-    const scheduledAt = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30-day grace
-    await persistUser({ ...user, deletionScheduledAt: scheduledAt });
+    const result = await AuthApiService.requestDeletion();
+    await persistUser({ ...user, deletionScheduledAt: result.scheduledAt });
   }, [user]);
 
   const cancelAccountDeletion = useCallback(async () => {
     if (!user) return;
+    await AuthApiService.cancelDeletion();
     await persistUser({ ...user, deletionScheduledAt: undefined });
   }, [user]);
 
   const grantConsent = useCallback(async () => {
     if (!user) return;
+    await AuthApiService.grantConsent();
     await persistUser({ ...user, consentGiven: true });
   }, [user]);
 
   // ── Social sign-in ────────────────────────────────────────────────────────────
-  // Thin wrapper — SocialAuthService handles the OAuth flow and token persistence.
-  // After the deep-link callback, we reload the user profile from the server
-  // (or local store in offline/dev mode) so the context is up to date.
+  // SocialAuthService handles the OAuth flow and token persistence; once tokens
+  // land we just need to load the live profile.
   const signInWithSocial = useCallback(async (provider: "google" | "linkedin") => {
-    // Lazy-import to avoid bundling expo-web-browser unless called
+    // Lazy-import to avoid bundling expo-web-browser unless social login is used.
     const { SocialAuthService } = await import("@/services/socialAuthService");
     await SocialAuthService[provider === "google" ? "signInWithGoogle" : "signInWithLinkedIn"]();
-    // After OAuth the session tokens are already saved by SocialAuthService.
-    // Try to fetch the live profile; fall back gracefully in offline/dev mode.
-    try {
-      const { AuthApiService } = await import("@/services/authApiService");
-      const profile = await AuthApiService.getProfile();
-      if (profile?.user) await persistUser(profile.user as User);
-    } catch {
-      // No backend in dev — leave user state as-is; the session is valid.
-    }
+    const profile = await AuthApiService.getProfile();
+    if (profile?.user) await persistUser(mapServerUser(profile.user));
   }, []);
 
   // ── Load user from server (called after OAuth deep-link callback) ────────────
   const loadUserFromServer = useCallback(async () => {
     try {
-      const { AuthApiService } = await import("@/services/authApiService");
       const profile = await AuthApiService.getProfile();
-      if (profile?.user) {
-        await persistUser(profile.user as User);
-      }
+      if (profile?.user) await persistUser(mapServerUser(profile.user));
     } catch (e) {
       console.warn("[AuthContext] loadUserFromServer failed:", e);
-      // Try loading from AsyncStorage as fallback
       const raw = await AsyncStorage.getItem(STORE.USER);
       if (raw) setUser(JSON.parse(raw));
     }
@@ -689,10 +568,4 @@ export function useAuth(): AuthContextType {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
-}
-
-// ─── Internal stored user (includes password hash + device list) ───────────────
-interface StoredUser extends User {
-  passwordHash?: string;
-  knownDevices?: string[];
 }

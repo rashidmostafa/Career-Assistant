@@ -1,9 +1,12 @@
 /**
  * AuthService — business logic for authentication.
  *
- * Handles: register (email + phone OTP), login, 2FA verify, refresh, logout,
- *          re-auth, account recovery, risk scoring, audit logging, TOTP setup
- *          with QR code, email + SMS OTP dispatch, and session management.
+ * Handles: register, login, 2FA verify, refresh, logout, re-auth, account
+ *          recovery, risk scoring, audit logging, TOTP setup with QR code,
+ *          email OTP dispatch, and session management.
+ *
+ * SMS/Twilio support was removed — Twilio isn't free and wasn't configured
+ * with real credentials. Email is the only OTP/2FA delivery channel now.
  */
 const crypto    = require("crypto");
 const speakeasy = require("speakeasy");
@@ -13,7 +16,6 @@ const AuditLog  = require("../models/AuditLog");
 const { issueAccessToken, issueRefreshToken, verifyRefreshToken } = require("../middleware/authMiddleware");
 const { blockIP } = require("../middleware/rateLimiter");
 const EmailService = require("./emailService");
-const SmsService   = require("./smsService");
 const dns = require("dns").promises;
 
 // ── Disposable email domain blocklist ─────────────────────────────────────────
@@ -65,6 +67,11 @@ const otpStore = new Map();
 
 function generateOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function generateBackupCodes(count = 10) {
+  const seg = () => Math.random().toString(36).slice(2, 6).toUpperCase();
+  return Array.from({ length: count }, () => `${seg()}-${seg()}`);
 }
 
 function storeOtp(key, code, ttlMs = 10 * 60 * 1000) {
@@ -176,14 +183,6 @@ const AuthService = {
     await EmailService.sendOtp(user.email, emailOtp, "verification");
     console.log(`[DEV] Email OTP for ${email}: ${emailOtp}`);
 
-    // Phone OTP (optional)
-    if (phone) {
-      const phoneOtp = generateOtp();
-      storeOtp(`phone_verify_${user._id}`, phoneOtp);
-      await SmsService.sendOtp(phone, phoneOtp, "verification");
-      console.log(`[DEV] Phone OTP for ${phone}: ${phoneOtp}`);
-    }
-
     // Security questions (optional at registration)
     if (securityQuestions?.length >= 3) {
       const bcrypt = require("bcryptjs");
@@ -221,26 +220,19 @@ const AuthService = {
     return { message: "Email verified successfully." };
   },
 
-  // ── Send phone OTP ────────────────────────────────────────────────────────────
-  async sendPhoneOtp({ userId, phone }, req) {
+  // ── Resend registration email OTP ─────────────────────────────────────────────
+  async resendVerificationEmail({ userId }, req) {
     const user = await User.findById(userId);
     if (!user) throw Object.assign(new Error("User not found."), { status: 404 });
+    if (user.emailVerified) {
+      throw Object.assign(new Error("This email is already verified."), { status: 400 });
+    }
     const otp = generateOtp();
-    storeOtp(`phone_verify_${userId}`, otp);
-    await SmsService.sendOtp(phone, otp, "verification");
-    console.log(`[DEV] Phone OTP for ${phone}: ${otp}`);
-    await audit("phone_otp_sent", userId, req);
-    return { message: "Verification code sent to your phone." };
-  },
-
-  // ── Verify phone OTP ──────────────────────────────────────────────────────────
-  async verifyPhone({ userId, otp }, req) {
-    const result = verifyStoredOtp(`phone_verify_${userId}`, otp);
-    if (!result.valid) throw Object.assign(new Error(result.error), { status: 400 });
-    const user = await User.findByIdAndUpdate(userId, { phoneVerified: true }, { new: true });
-    if (!user) throw Object.assign(new Error("User not found."), { status: 404 });
-    await audit("phone_verified", userId, req);
-    return { message: "Phone number verified successfully." };
+    storeOtp(`email_verify_${user._id}`, otp);
+    await EmailService.sendOtp(user.email, otp, "verification");
+    console.log(`[DEV] Resent email OTP for ${user.email}: ${otp}`);
+    await audit("verification_email_resent", user._id, req);
+    return { message: "Verification code resent. Check your email." };
   },
 
   // ── Login ─────────────────────────────────────────────────────────────────────
@@ -299,17 +291,13 @@ const AuthService = {
 
     // 2FA required?
     if (user.twoFactorEnabled && !isDeviceTrusted) {
-      // Send OTP code for SMS/email 2FA
+      // Send OTP code for email 2FA (or skip — TOTP codes are already
+      // rotating locally on the user's authenticator app, nothing to send).
       if (user.twoFactorMethod === "email") {
         const code = generateOtp();
         storeOtp(`2fa_${user._id}`, code);
         await EmailService.sendOtp(user.email, code, "2fa");
         console.log(`[DEV] 2FA email code for ${user.email}: ${code}`);
-      } else if (user.twoFactorMethod === "sms" && user.phone) {
-        const code = generateOtp();
-        storeOtp(`2fa_${user._id}`, code);
-        await SmsService.sendOtp(user.phone, code, "2fa");
-        console.log(`[DEV] 2FA SMS code for ${user.phone}: ${code}`);
       }
 
       await audit("2fa_required", user._id, req, { riskScore, level });
@@ -368,7 +356,7 @@ const AuthService = {
         token:    code.replace(/\s/g, ""),
         window:   1,
       });
-    } else if (method === "sms" || method === "email") {
+    } else if (method === "email") {
       const result = verifyStoredOtp(`2fa_${userId}`, code);
       verified = result.valid;
       if (!result.valid) throw Object.assign(new Error(result.error), { status: 400 });
@@ -407,9 +395,6 @@ const AuthService = {
     if (method === "email") {
       await EmailService.sendOtp(user.email, code, "2fa");
       console.log(`[DEV] Resent 2FA email code for ${user.email}: ${code}`);
-    } else if (method === "sms" && user.phone) {
-      await SmsService.sendOtp(user.phone, code, "2fa");
-      console.log(`[DEV] Resent 2FA SMS code for ${user.phone}: ${code}`);
     }
     await audit("2fa_code_resent", userId, req, { method });
     return { message: "Verification code sent." };
@@ -425,10 +410,7 @@ const AuthService = {
       issuer: "CareerAssistant",
     });
 
-    const backupCodes = Array.from({ length: 10 }, () => {
-      const seg = () => Math.random().toString(36).slice(2, 6).toUpperCase();
-      return `${seg()}-${seg()}`;
-    });
+    const backupCodes = generateBackupCodes();
 
     // Generate QR code data URI
     const qrDataUri = await generateQrDataUri(secret.otpauth_url);
@@ -448,13 +430,43 @@ const AuthService = {
     };
   },
 
+  // ── Email 2FA setup ────────────────────────────────────────────────────────────
+  // No persistent secret involved — each login sends a fresh OTP by email,
+  // same mechanism as the login-time 2FA challenge.
+  async setupOtp2FA(userId, method, req) {
+    if (method !== "email") {
+      throw Object.assign(new Error("Method must be 'email'."), { status: 400 });
+    }
+    const user = await User.findById(userId);
+    if (!user) throw Object.assign(new Error("User not found."), { status: 404 });
+
+    const backupCodes = generateBackupCodes();
+
+    await User.findByIdAndUpdate(userId, {
+      twoFactorEnabled: true,
+      twoFactorMethod:  method,
+      totpSecret:       null,
+      backupCodes,
+    });
+
+    await audit("2fa_enabled", userId, req, { method });
+    return { method, backupCodes };
+  },
+
   // ── Disable 2FA ───────────────────────────────────────────────────────────────
   async disable2FA({ userId, code }, req) {
     const user = await User.findById(userId).select("+totpSecret");
     if (!user) throw Object.assign(new Error("User not found."), { status: 404 });
-    if (user.twoFactorEnabled && user.twoFactorMethod === "totp") {
-      const ok = speakeasy.totp.verify({ secret: user.totpSecret, encoding: "base32", token: code, window: 1 });
-      if (!ok) throw Object.assign(new Error("Invalid code."), { status: 400 });
+    if (user.twoFactorEnabled) {
+      if (user.twoFactorMethod === "totp") {
+        const ok = speakeasy.totp.verify({ secret: user.totpSecret, encoding: "base32", token: code, window: 1 });
+        if (!ok) throw Object.assign(new Error("Invalid code."), { status: 400 });
+      } else {
+        // Email — verify against the OTP the client asked us to send via
+        // /2fa/resend before showing the disable confirmation.
+        const result = verifyStoredOtp(`2fa_${userId}`, code);
+        if (!result.valid) throw Object.assign(new Error(result.error), { status: 400 });
+      }
     }
     await User.findByIdAndUpdate(userId, {
       twoFactorEnabled: false,
@@ -559,13 +571,11 @@ const AuthService = {
   },
 
   // ── Account recovery ──────────────────────────────────────────────────────────
-  async recoverAccount({ method, email, phone, answers }, req) {
+  async recoverAccount({ method, email, answers }, req) {
     let user;
 
     if (method === "email" || method === "security_questions") {
       user = await User.findOne({ email: email?.toLowerCase() }).select("+securityQuestions");
-    } else if (method === "sms") {
-      user = await User.findOne({ phone }).select("+securityQuestions");
     }
 
     if (!user) {
@@ -579,14 +589,6 @@ const AuthService = {
       await EmailService.sendOtp(user.email, otp, "recovery");
       console.log(`[DEV] Recovery OTP for ${user.email}: ${otp}`);
       return { message: "Recovery code sent to your email.", userId: user._id.toString() };
-    }
-
-    if (method === "sms") {
-      const otp = generateOtp();
-      storeOtp(`recovery_${user._id}`, otp, 60 * 60 * 1000);
-      await SmsService.sendOtp(user.phone, otp, "recovery");
-      console.log(`[DEV] Recovery SMS OTP for ${user.phone}: ${otp}`);
-      return { message: "Recovery code sent to your phone.", userId: user._id.toString() };
     }
 
     if (method === "security_questions") {

@@ -32,7 +32,12 @@ function AuthGate({ children, isOAuthLoading }: { children: React.ReactNode; isO
     // Don't redirect while OAuth callback is loading user profile
     if (isOAuthLoading?.current) return;
 
-    const inAuth       = segments[0] === "auth";
+    // "auth-2fa" is a sibling route (app/auth-2fa.tsx), not nested under
+    // "auth" — segments[0] === "auth" alone missed it, so the gate was
+    // bouncing users straight back to /auth the instant login pushed them
+    // to the 2FA screen (require2FA responses leave `user` still null until
+    // the code is verified).
+    const inAuth       = segments[0] === "auth" || segments[0] === "auth-2fa";
     const inOnboarding = segments[0] === "onboarding";
     const inReauth     = (segments as string[]).some((s) => s === "auth-reauth");
     const inTabs       = segments[0] === "(tabs)";

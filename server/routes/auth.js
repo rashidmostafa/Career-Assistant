@@ -1,6 +1,6 @@
 /**
  * Auth routes — /api/auth/*
- * Includes: register, email/phone OTP, login, 2FA, refresh, logout,
+ * Includes: register, email OTP, login, 2FA, refresh, logout,
  *           reauth, recovery, reset-password, Google/LinkedIn OAuth,
  *           and biometric register/verify/disable.
  *
@@ -40,20 +40,10 @@ router.post("/verify-email", authLimiter, async (req, res) => {
   }
 });
 
-// ── Send phone OTP ────────────────────────────────────────────────────────────
-router.post("/send-phone-otp", authLimiter, async (req, res) => {
+// ── Resend registration email OTP ─────────────────────────────────────────────
+router.post("/resend-verification", authLimiter, async (req, res) => {
   try {
-    const result = await AuthService.sendPhoneOtp(req.body, req);
-    res.json(result);
-  } catch (e) {
-    res.status(e.status ?? 500).json({ message: e.message });
-  }
-});
-
-// ── Verify phone OTP ──────────────────────────────────────────────────────────
-router.post("/verify-phone", authLimiter, async (req, res) => {
-  try {
-    const result = await AuthService.verifyPhone(req.body, req);
+    const result = await AuthService.resendVerificationEmail(req.body, req);
     res.json(result);
   } catch (e) {
     res.status(e.status ?? 500).json({ message: e.message });
@@ -96,6 +86,16 @@ router.post("/2fa/resend", authLimiter, async (req, res) => {
 router.post("/2fa/setup", authenticate, async (req, res) => {
   try {
     const result = await AuthService.setupTotp(req.userId);
+    res.json(result);
+  } catch (e) {
+    res.status(e.status ?? 500).json({ message: e.message });
+  }
+});
+
+// ── 2FA setup (Email) ──────────────────────────────────────────────────────────
+router.post("/2fa/setup-otp", authenticate, async (req, res) => {
+  try {
+    const result = await AuthService.setupOtp2FA(req.userId, req.body.method, req);
     res.json(result);
   } catch (e) {
     res.status(e.status ?? 500).json({ message: e.message });

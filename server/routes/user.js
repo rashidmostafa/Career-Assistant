@@ -13,7 +13,7 @@ const { authenticate } = require("../middleware/authMiddleware");
 // ─── Profile ──────────────────────────────────────────────────────────────────
 router.get("/profile", authenticate, async (req, res) => {
   try {
-    const user = await User.findById(req.userId);
+    const user = await User.findById(req.userId).select("+backupCodes");
     if (!user) return res.status(404).json({ message: "User not found." });
     res.json({ user: user.toSafeObject() });
   } catch (e) {

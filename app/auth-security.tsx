@@ -3,9 +3,10 @@
  * Covers: profile, 2FA setup, biometric, session, GDPR data export/deletion.
  */
 import {
-  ArrowLeft, Bell, Download, Eye, Fingerprint, Key, Lock,
+  ArrowLeft, Bell, Check, Copy, Download, Eye, Fingerprint, Key, Lock,
   LogOut, RefreshCw, Shield, Trash2, User as UserIcon,
 } from "lucide-react-native";
+import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
@@ -24,7 +25,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { OtpService } from "@/services/otpService";
+import { OtpInput } from "@/components/auth/OtpInput";
 import { RiskScoringService } from "@/services/riskScoring";
 import { SessionManager } from "@/services/sessionManager";
 import type { RiskLevel } from "@/services/riskScoring";
@@ -45,26 +46,38 @@ export default function SecurityScreen() {
     signOut, updateUser,
   } = useAuth();
 
-  const [totpSetup, setTotpSetup] = useState<{ qrUri: string; secret: string; backupCodes: string[] } | null>(null);
+  const [twoFAResult, setTwoFAResult] = useState<{ method: "email"; backupCodes: string[] } | null>(null);
   const [loading, setLoading]     = useState<string | null>(null);
-  const [backupCount, setBackupCount] = useState(0);
   const [sessionStart, setSessionStart] = useState<number | null>(null);
+  const [copiedField, setCopiedField] = useState<"backupCodes" | null>(null);
+  const [showDisableInput, setShowDisableInput] = useState(false);
+  const [disableError, setDisableError] = useState(false);
 
   useEffect(() => {
     if (user) {
-      OtpService.getRemainingBackupCodes(user.id).then(setBackupCount);
       SessionManager.getSessionStartMs().then(setSessionStart);
     }
   }, [user?.id]);
 
-  // ── 2FA setup ────────────────────────────────────────────────────────────────
-  const handleSetupTotp = useCallback(async () => {
+  const handleCopy = useCallback(async (field: "backupCodes", text: string) => {
+    await Clipboard.setStringAsync(text);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    setCopiedField(field);
+    setTimeout(() => setCopiedField((f) => (f === field ? null : f)), 2000);
+  }, []);
+
+  // ── 2FA setup (Email) ──────────────────────────────────────────────────────────
+  // No secret/QR involved — each login sends a fresh one-time code by email.
+  // Calls the real server endpoint, which marks the account 2FA-enabled there
+  // (what login actually checks).
+  const handleSetupOtp2FA = useCallback(async (method: "email") => {
     if (!user) return;
-    setLoading("totp");
+    setLoading(method);
     try {
-      const setup = await OtpService.setupTotp(user.id);
-      setTotpSetup(setup);
-      await updateUser({ twoFactorEnabled: true, twoFactorMethod: "totp" });
+      const { AuthApiService } = await import("@/services/authApiService");
+      const setup = await AuthApiService.setup2FAOtp(method);
+      setTwoFAResult({ method, backupCodes: setup.backupCodes });
+      await updateUser({ twoFactorEnabled: true, twoFactorMethod: method, backupCodesRemaining: setup.backupCodes.length });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     } catch (e: any) {
       Alert.alert("Error", e.message);
@@ -73,19 +86,56 @@ export default function SecurityScreen() {
     }
   }, [user, updateUser]);
 
+  // Disabling 2FA server-side requires proving you still hold access to the
+  // 2FA channel — otherwise anyone with a stolen session could silently turn
+  // it off. For email we have to actually send a fresh code first (there's
+  // no rotating code sitting on-device the way TOTP has).
   const handleDisable2FA = useCallback(() => {
     Alert.alert(
       "Disable 2FA",
-      "Removing 2FA will make your account less secure. Are you sure?",
+      user?.twoFactorMethod === "totp"
+        ? "Removing 2FA will make your account less secure. You'll need to enter your current authenticator code to confirm."
+        : "Removing 2FA will make your account less secure. We'll send a code to your email to confirm.",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Disable",
+          text: "Continue",
           style: "destructive",
-          onPress: () => updateUser({ twoFactorEnabled: false, twoFactorMethod: undefined }),
+          onPress: async () => {
+            if (user?.twoFactorMethod !== "totp") {
+              setLoading("disable2fa");
+              try {
+                const { AuthApiService } = await import("@/services/authApiService");
+                await AuthApiService.resend2FA({ userId: user!.id, method: user!.twoFactorMethod as string });
+              } catch (e: any) {
+                Alert.alert("Error", e.message);
+                setLoading(null);
+                return;
+              }
+              setLoading(null);
+            }
+            setShowDisableInput(true);
+          },
         },
       ]
     );
+  }, [user]);
+
+  const confirmDisable2FA = useCallback(async (code: string) => {
+    setLoading("disable2fa");
+    try {
+      const { AuthApiService } = await import("@/services/authApiService");
+      await AuthApiService.disable2FA(code);
+      await updateUser({ twoFactorEnabled: false, twoFactorMethod: undefined, backupCodesRemaining: undefined });
+      setShowDisableInput(false);
+      setDisableError(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } catch (e: any) {
+      setDisableError(true);
+      Alert.alert("Incorrect code", e.message ?? "That code didn't match. Please try again.");
+    } finally {
+      setLoading(null);
+    }
   }, [updateUser]);
 
   // ── Biometric ────────────────────────────────────────────────────────────────
@@ -191,16 +241,21 @@ export default function SecurityScreen() {
           <Row label="Method" value={user.twoFactorMethod?.toUpperCase() ?? "TOTP"} colors={colors} />
         )}
         {user.twoFactorEnabled && (
-          <Row label="Backup codes remaining" value={`${backupCount} / 10`} valueColor={backupCount < 3 ? "#f59e0b" : undefined} colors={colors} />
+          <Row
+            label="Backup codes remaining"
+            value={`${user.backupCodesRemaining ?? "—"} / 10`}
+            valueColor={(user.backupCodesRemaining ?? 10) < 3 ? "#f59e0b" : undefined}
+            colors={colors}
+          />
         )}
 
         {!user.twoFactorEnabled ? (
           <TouchableOpacity
             style={[styles.actionBtn, { borderColor: "#10b981" + "40", backgroundColor: "#10b98110" }]}
-            onPress={handleSetupTotp} disabled={loading === "totp"}
-            accessibilityRole="button" accessibilityLabel="Set up 2FA">
-            {loading === "totp" ? <ActivityIndicator color="#10b981" size="small" /> : <Shield size={16} color="#10b981" />}
-            <Text style={[styles.actionBtnText, { color: "#10b981" }]}>Set up TOTP Authenticator</Text>
+            onPress={() => handleSetupOtp2FA("email")} disabled={loading === "email"}
+            accessibilityRole="button" accessibilityLabel="Set up Email 2FA">
+            {loading === "email" ? <ActivityIndicator color="#10b981" size="small" /> : <Shield size={16} color="#10b981" />}
+            <Text style={[styles.actionBtnText, { color: "#10b981" }]}>Set up Email 2FA</Text>
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
@@ -212,20 +267,52 @@ export default function SecurityScreen() {
           </TouchableOpacity>
         )}
 
-        {totpSetup && (
+        {showDisableInput && (
           <View style={[styles.totpSetupCard, { backgroundColor: colors.background, borderColor: colors.border }]}>
-            <Text style={[styles.totpTitle, { color: colors.foreground }]}>📱 TOTP Setup</Text>
+            <Text style={[styles.totpTitle, { color: colors.foreground }]}>Enter your current code</Text>
+            <Text style={[styles.totpSub, { color: colors.mutedForeground, marginBottom: 10 }]}>
+              {user.twoFactorMethod === "totp"
+                ? "Confirm with the 6-digit code from your authenticator app to disable 2FA."
+                : "Confirm with the code we just sent to your email to disable 2FA."}
+            </Text>
+            {loading === "disable2fa"
+              ? <ActivityIndicator color="#ef4444" style={{ marginVertical: 12 }} />
+              : <OtpInput onComplete={confirmDisable2FA} hasError={disableError} />}
+            <TouchableOpacity
+              style={[styles.copyBtn, { alignSelf: "center", marginTop: 12 }]}
+              onPress={() => { setShowDisableInput(false); setDisableError(false); }}
+              accessibilityRole="button" accessibilityLabel="Cancel">
+              <Text style={[styles.copyBtnText, { color: colors.mutedForeground }]}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {twoFAResult && (
+          <View style={[styles.totpSetupCard, { backgroundColor: colors.background, borderColor: colors.border }]}>
+            <Text style={[styles.totpTitle, { color: colors.foreground }]}>✉️ Email 2FA enabled</Text>
             <Text style={[styles.totpSub, { color: colors.mutedForeground }]}>
-              Add this account to your authenticator app using the secret below, then verify with a code.
+              From now on, sign-in will send a 6-digit code to your email.
             </Text>
-            <View style={[styles.secretBox, { backgroundColor: colors.card, borderColor: colors.primary }]}>
-              <Text style={[styles.secretText, { color: colors.primary }]}>{totpSetup.secret}</Text>
+            <View style={styles.totpSubRow}>
+              <Text style={[styles.totpSub, { color: colors.mutedForeground, marginTop: 10, flex: 1 }]}>
+                Backup codes (shown once — store securely):
+              </Text>
+              <TouchableOpacity
+                style={[styles.copyBtn, { backgroundColor: colors.primary + "18", marginTop: 10 }]}
+                onPress={() => handleCopy("backupCodes", twoFAResult.backupCodes.join("\n"))}
+                accessibilityRole="button"
+                accessibilityLabel="Copy all backup codes"
+              >
+                {copiedField === "backupCodes"
+                  ? <Check size={16} color={colors.primary} />
+                  : <Copy size={16} color={colors.primary} />}
+                <Text style={[styles.copyBtnText, { color: colors.primary }]}>
+                  {copiedField === "backupCodes" ? "Copied" : "Copy all"}
+                </Text>
+              </TouchableOpacity>
             </View>
-            <Text style={[styles.totpSub, { color: colors.mutedForeground, marginTop: 10 }]}>
-              Backup codes (shown once — store securely):
-            </Text>
             <View style={styles.backupGrid}>
-              {totpSetup.backupCodes.map((c) => (
+              {twoFAResult.backupCodes.map((c) => (
                 <View key={c} style={[styles.backupCode, { backgroundColor: colors.card, borderColor: colors.border }]}>
                   <Text style={[styles.backupCodeText, { color: colors.foreground }]}>{c}</Text>
                 </View>
@@ -378,8 +465,11 @@ const styles = StyleSheet.create({
   totpSetupCard: { borderRadius: 12, borderWidth: 1, padding: 14, marginTop: 8 },
   totpTitle: { fontFamily: "Inter_700Bold", fontSize: 14, marginBottom: 6 },
   totpSub: { fontFamily: "Inter_500Medium", fontSize: 12, lineHeight: 18 },
-  secretBox: { borderRadius: 10, borderWidth: 1.5, padding: 12, marginTop: 8, alignItems: "center" },
-  secretText: { fontFamily: "Inter_700Bold", fontSize: 15, letterSpacing: 2 },
+  totpSubRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  secretBox: { borderRadius: 10, borderWidth: 1.5, padding: 12, marginTop: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  secretText: { fontFamily: "Inter_700Bold", fontSize: 15, letterSpacing: 2, flex: 1 },
+  copyBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  copyBtnText: { fontFamily: "Inter_600SemiBold", fontSize: 12 },
   backupGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
   backupCode: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1 },
   backupCodeText: { fontFamily: "Inter_600SemiBold", fontSize: 12, letterSpacing: 1 },

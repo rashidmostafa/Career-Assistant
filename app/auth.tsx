@@ -31,7 +31,6 @@ import { OtpInput } from "@/components/auth/OtpInput";
 import { PasswordStrengthBar } from "@/components/auth/PasswordStrengthBar";
 import { BiometricButton } from "@/components/auth/BiometricButton";
 import { SecurityQuestionsForm } from "@/components/auth/SecurityQuestionsForm";
-import { OtpService } from "@/services/otpService";
 import { SocialAuthService } from "@/services/socialAuthService";
 import { useBiometric } from "@/hooks/useBiometric";
 
@@ -90,8 +89,8 @@ export default function AuthScreen() {
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
   const [otpError, setOtpError] = useState(false);
-  const [pendingId, setPendingId] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [resendLoading, setResendLoading] = useState(false);
   const [otpTimer, setOtpTimer] = useState(0);
   const otpTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const [consentGiven, setConsentGiven] = useState(false);
@@ -113,7 +112,7 @@ export default function AuthScreen() {
       const result = await signIn(email.trim().toLowerCase(), password);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       if (result.require2FA) {
-        router.push({ pathname: "/auth-2fa", params: { userId: result.userId ?? "" } });
+        router.push({ pathname: "/auth-2fa", params: { userId: result.userId ?? "", method: result.method ?? "totp" } });
       } else {
         router.replace("/(tabs)");
       }
@@ -201,15 +200,9 @@ export default function AuthScreen() {
     setOtpError(false);
     setLoading(true);
     try {
-      const userId = pendingUserId ?? pendingId;
-      if (!userId) throw new Error("Session expired. Please register again.");
-      const result = await OtpService.verifyOtp(`email_verify_${userId}`, code);
-      if (!result.valid) {
-        setOtpError(true);
-        setError(result.error ?? "Invalid code.");
-        return;
-      }
-      await confirmEmailVerified();
+      // confirmEmailVerified checks the code against the server (real OTP,
+      // real email) and signs the user in on success.
+      await confirmEmailVerified(code);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       // Prompt to set security questions
       setMode("security-questions");
@@ -219,17 +212,27 @@ export default function AuthScreen() {
     } finally {
       setLoading(false);
     }
-  }, [pendingUserId, pendingId, confirmEmailVerified]);
+  }, [confirmEmailVerified]);
 
   const handleResendOtp = useCallback(async () => {
-    if (resendCooldown > 0) return;
-    await resendVerification();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    setResendCooldown(60);
-    const interval = setInterval(() => {
-      setResendCooldown((c) => { if (c <= 1) { clearInterval(interval); return 0; } return c - 1; });
-    }, 1000);
-  }, [resendCooldown, resendVerification]);
+    if (resendCooldown > 0 || resendLoading) return;
+    // Block re-taps immediately — resendCooldown itself isn't set until the
+    // request resolves, which left a window for rapid double/triple taps to
+    // all fire before the button visually disabled itself.
+    setResendLoading(true);
+    try {
+      await resendVerification();
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      setResendCooldown(60);
+      const interval = setInterval(() => {
+        setResendCooldown((c) => { if (c <= 1) { clearInterval(interval); return 0; } return c - 1; });
+      }, 1000);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setResendLoading(false);
+    }
+  }, [resendCooldown, resendLoading, resendVerification]);
 
   // ── Security questions ────────────────────────────────────────────────────────
   const handleSecurityQuestions = useCallback(async (qs: Array<{ question: string; answer: string }>) => {
@@ -435,12 +438,12 @@ export default function AuthScreen() {
               <Text style={[styles.switchText, { color: colors.mutedForeground }]}>Didn't receive it? </Text>
               <TouchableOpacity
                 onPress={handleResendOtp}
-                disabled={resendCooldown > 0}
+                disabled={resendCooldown > 0 || resendLoading}
                 accessibilityRole="button"
                 accessibilityLabel={resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend code"}
               >
-                <Text style={[styles.switchLink, { color: resendCooldown > 0 ? colors.mutedForeground : colors.primary }]}>
-                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend code"}
+                <Text style={[styles.switchLink, { color: (resendCooldown > 0 || resendLoading) ? colors.mutedForeground : colors.primary }]}>
+                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : resendLoading ? "Sending…" : "Resend code"}
                 </Text>
               </TouchableOpacity>
             </View>
