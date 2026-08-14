@@ -1,4 +1,4 @@
-import { Edit2, X, LogOut, Check, Camera, Trash2, AlertTriangle, ChevronDown, ShieldCheck, ChevronRight } from "lucide-react-native";
+import { Edit2, X, LogOut, Check, Camera, Trash2, AlertTriangle, ChevronDown, ShieldCheck, ChevronRight, Briefcase, FileText, Map } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
@@ -16,6 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/context/AuthContext";
 import { useCV } from "@/context/CVContext";
@@ -323,11 +324,18 @@ export default function ProfileScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: bottomPad + 100 }} showsVerticalScrollIndicator={false}>
-        <View style={styles.avatarSection}>
-          {user?.photoUri
-            ? <Image source={{ uri: user.photoUri }} style={[styles.avatarImage, { borderColor: colors.primary }]} />
-            : <View style={[styles.avatar, { backgroundColor: colors.primary }]}><Text style={styles.avatarText}>{initials}</Text></View>
-          }
+        <Animated.View entering={FadeInDown.duration(500).springify().damping(14)} style={styles.avatarSection}>
+          <LinearGradient
+            colors={[colors.primary, (colors.jobs || "#7c3aed")]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.avatarRing}
+          >
+            {user?.photoUri
+              ? <Image source={{ uri: user.photoUri }} style={styles.avatarImage} />
+              : <View style={[styles.avatar, { backgroundColor: colors.card }]}><Text style={[styles.avatarText, { color: colors.primary }]}>{initials}</Text></View>
+            }
+          </LinearGradient>
           {editing ? (
             <TouchableOpacity style={[styles.photoBtn, { borderColor: colors.border, backgroundColor: colors.card }]} onPress={handlePickPhoto}>
               <Camera size={16} color={colors.primary} />
@@ -339,9 +347,25 @@ export default function ProfileScreen() {
               <Text style={[styles.displayEmail, { color: colors.mutedForeground }]}>{user?.email}</Text>
             </>
           )}
-        </View>
+        </Animated.View>
 
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Animated.View entering={FadeInDown.duration(500).delay(80).springify().damping(14)} style={styles.statsGrid}>
+          {[
+            { label: "Jobs Applied", value: String(appliedJobIds.length), color: colors.jobs || "#7c3aed", icon: Briefcase },
+            { label: "CV Score", value: cvProfile ? `${cvProfile.atsScore}` : "—", color: colors.cv || "#0891b2", icon: FileText },
+            { label: "Weeks Done", value: `${completedModules}/${totalModules || 12}`, color: colors.roadmap || "#059669", icon: Map },
+          ].map((s) => (
+            <View key={s.label} style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={[styles.statIconWrap, { backgroundColor: s.color + "15" }]}>
+                <s.icon size={14} color={s.color} strokeWidth={2.5} />
+              </View>
+              <Text style={[styles.statValue, { color: s.color }]}>{s.value}</Text>
+              <Text style={[styles.statLabel, { color: colors.mutedForeground }]} numberOfLines={1}>{s.label}</Text>
+            </View>
+          ))}
+        </Animated.View>
+
+        <Animated.View entering={FadeInDown.duration(500).delay(140).springify().damping(14)} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.mutedForeground }]}>Career Profile</Text>
           <DropField label="Background" value={background} placeholder="Select background" onPress={() => setActivePicker("background")} error={fieldErrors.background} />
           <DropField
@@ -367,52 +391,48 @@ export default function ProfileScreen() {
               </Text>
             </View>
           )}
-        </View>
+        </Animated.View>
 
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Animated.View entering={FadeInDown.duration(500).delay(200).springify().damping(14)} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.mutedForeground }]}>Account</Text>
-          {[
-            { label: "Email", value: user?.email || "" },
-            { label: "Jobs Applied", value: String(appliedJobIds.length) },
-            { label: "CV Score", value: cvProfile ? `${cvProfile.atsScore}/100` : "—" },
-            { label: "Roadmap Progress", value: totalModules > 0 ? `${completedModules}/${totalModules} weeks` : "—" },
-          ].map((f) => (
-            <View key={f.label} style={styles.statRow}>
-              <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>{f.label}</Text>
-              <Text style={[styles.statValue, { color: colors.foreground }]}>{f.value}</Text>
-            </View>
-          ))}
-        </View>
+          <View style={[styles.fieldRow, { marginBottom: 0 }]}>
+            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Email</Text>
+            <Text style={[styles.fieldValue, { color: colors.foreground }]}>{user?.email || "—"}</Text>
+          </View>
+        </Animated.View>
 
         {editing && (
-          <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.primary }]} onPress={handleSave}>
+          <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.primary, shadowColor: colors.primary }]} onPress={handleSave} activeOpacity={0.88}>
             <Check size={20} color="#fff" strokeWidth={3} />
             <Text style={styles.saveBtnText}>Save Changes</Text>
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity
-          style={[styles.securityRow, { backgroundColor: colors.card, borderColor: colors.border }]}
-          onPress={() => router.push("/auth-security")}
-          accessibilityRole="button"
-          accessibilityLabel="Security & Privacy settings"
-        >
-          <View style={[styles.securityIcon, { backgroundColor: colors.primary + "18" }]}>
-            <ShieldCheck size={20} color={colors.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.securityTitle, { color: colors.foreground }]}>Security & Privacy</Text>
-            <Text style={[styles.securitySubtitle, { color: colors.mutedForeground }]}>
-              2FA, biometrics, backup codes, data export
-            </Text>
-          </View>
-          <ChevronRight size={20} color={colors.mutedForeground} />
-        </TouchableOpacity>
+        <Animated.View entering={FadeInDown.duration(500).delay(260).springify().damping(14)}>
+          <TouchableOpacity
+            style={[styles.securityRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+            onPress={() => router.push("/auth-security")}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Security & Privacy settings"
+          >
+            <View style={[styles.securityIcon, { backgroundColor: colors.primary + "18" }]}>
+              <ShieldCheck size={20} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.securityTitle, { color: colors.foreground }]}>Security & Privacy</Text>
+              <Text style={[styles.securitySubtitle, { color: colors.mutedForeground }]}>
+                2FA, biometrics, backup codes, data export
+              </Text>
+            </View>
+            <ChevronRight size={20} color={colors.mutedForeground} />
+          </TouchableOpacity>
 
-        <TouchableOpacity style={[styles.signOutBtn, { borderColor: colors.destructive, backgroundColor: colors.card }]} onPress={handleSignOut}>
-          <LogOut size={20} color={colors.destructive} />
-          <Text style={[styles.signOutText, { color: colors.destructive }]}>Sign Out</Text>
-        </TouchableOpacity>
+          <TouchableOpacity style={[styles.signOutBtn, { borderColor: colors.destructive, backgroundColor: colors.card }]} onPress={handleSignOut} activeOpacity={0.85}>
+            <LogOut size={20} color={colors.destructive} />
+            <Text style={[styles.signOutText, { color: colors.destructive }]}>Sign Out</Text>
+          </TouchableOpacity>
+        </Animated.View>
       </ScrollView>
     </View>
   );
@@ -427,14 +447,18 @@ const styles = StyleSheet.create({
   headerBlobTwo: { width: 96, height: 96, left: -20, top: 54 },
   headerTitle: { fontSize: 24, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
   editBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
-  avatarSection: { alignItems: "center", marginBottom: 32 },
-  avatar: { width: 96, height: 96, borderRadius: 48, alignItems: "center", justifyContent: "center", marginBottom: 12, shadowColor: "#2563eb", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.25, shadowRadius: 16, elevation: 8 },
-  avatarImage: { width: 96, height: 96, borderRadius: 48, marginBottom: 12, borderWidth: 2 },
-  avatarText: { color: "#fff", fontSize: 40, fontFamily: "Inter_700Bold" },
+  avatarSection: { alignItems: "center", marginBottom: 24 },
+  avatarRing: { width: 100, height: 100, borderRadius: 50, alignItems: "center", justifyContent: "center", marginBottom: 12, padding: 3, shadowColor: "#2563eb", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.25, shadowRadius: 16, elevation: 8 },
+  avatar: { width: "100%", height: "100%", borderRadius: 47, alignItems: "center", justifyContent: "center" },
+  avatarImage: { width: "100%", height: "100%", borderRadius: 47 },
+  avatarText: { fontSize: 36, fontFamily: "Inter_700Bold" },
   photoBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1, marginTop: 8 },
   photoBtnText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
-  displayName: { fontSize: 24, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
-  displayEmail: { fontSize: 15, fontFamily: "Inter_500Medium", marginTop: 4 },
+  displayName: { fontSize: 22, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
+  displayEmail: { fontSize: 14, fontFamily: "Inter_500Medium", marginTop: 4 },
+  statsGrid: { flexDirection: "row", gap: 10, marginBottom: 20 },
+  statCard: { flex: 1, borderRadius: 16, padding: 12, borderWidth: 1, alignItems: "center", gap: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
+  statIconWrap: { width: 26, height: 26, borderRadius: 8, alignItems: "center", justifyContent: "center", marginBottom: 2 },
   card: { borderRadius: 24, padding: 24, borderWidth: 1, marginBottom: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.05, shadowRadius: 12, elevation: 2 },
   cardTitle: { fontSize: 13, fontFamily: "Inter_700Bold", textTransform: "uppercase", letterSpacing: 1, marginBottom: 20 },
   fieldRow: { marginBottom: 18 },
@@ -444,9 +468,9 @@ const styles = StyleSheet.create({
   dropdownBtnText: { flex: 1, fontSize: 15, fontFamily: "Inter_500Medium" },
   warningBanner: { flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 12, borderRadius: 10, borderWidth: 1, marginTop: 4 },
   warningText: { flex: 1, fontSize: 12, fontFamily: "Inter_500Medium", lineHeight: 18 },
-  statRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 },
-  statValue: { fontSize: 15, fontFamily: "Inter_700Bold" },
-  saveBtn: { flexDirection: "row", alignItems: "center", gap: 10, justifyContent: "center", paddingVertical: 18, borderRadius: 16, marginBottom: 16, shadowColor: "#2563eb", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.18, shadowRadius: 14, elevation: 4 },
+  statValue: { fontFamily: "Inter_700Bold", fontSize: 18, letterSpacing: -0.4 },
+  statLabel: { fontFamily: "Inter_600SemiBold", fontSize: 10, textAlign: "center", letterSpacing: 0.4, textTransform: "uppercase" },
+  saveBtn: { flexDirection: "row", alignItems: "center", gap: 10, justifyContent: "center", paddingVertical: 18, borderRadius: 16, marginBottom: 16, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.18, shadowRadius: 14, elevation: 4 },
   saveBtnText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 16 },
   securityRow: { flexDirection: "row", alignItems: "center", gap: 14, padding: 18, borderRadius: 20, borderWidth: 1, marginBottom: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 },
   securityIcon: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },

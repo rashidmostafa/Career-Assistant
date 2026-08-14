@@ -3,8 +3,8 @@
  * Covers: profile, 2FA setup, biometric, session, GDPR data export/deletion.
  */
 import {
-  ArrowLeft, Bell, Check, Copy, Download, Eye, Fingerprint, Key, Lock,
-  LogOut, RefreshCw, Shield, Trash2, User as UserIcon,
+  ArrowLeft, Bell, Check, Copy, Download, Eye, Fingerprint, Key, Laptop, Lock,
+  LogOut, RefreshCw, ScrollText, Shield, Trash2, User as UserIcon,
 } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
@@ -243,6 +243,20 @@ export default function SecurityScreen() {
           accessibilityRole="button" accessibilityLabel="Re-authenticate now">
           <RefreshCw size={16} color={colors.primary} />
           <Text style={[styles.actionBtnText, { color: colors.primary }]}>Re-authenticate now</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.actionBtn, { borderColor: colors.border, backgroundColor: colors.background }]}
+          onPress={() => router.push("/auth-sessions")}
+          accessibilityRole="button" accessibilityLabel="View active sessions">
+          <Laptop size={16} color={colors.foreground} />
+          <Text style={[styles.actionBtnText, { color: colors.foreground }]}>Active Sessions</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.actionBtn, { borderColor: colors.border, backgroundColor: colors.background }]}
+          onPress={() => router.push("/auth-audit-log")}
+          accessibilityRole="button" accessibilityLabel="View security activity log">
+          <ScrollText size={16} color={colors.foreground} />
+          <Text style={[styles.actionBtnText, { color: colors.foreground }]}>Security Activity Log</Text>
         </TouchableOpacity>
       </View>
 

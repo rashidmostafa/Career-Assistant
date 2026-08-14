@@ -5,14 +5,10 @@ describe('passport bootstrap', () => {
     const original = {
       GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
       GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
-      LINKEDIN_CLIENT_ID: process.env.LINKEDIN_CLIENT_ID,
-      LINKEDIN_CLIENT_SECRET: process.env.LINKEDIN_CLIENT_SECRET,
     };
 
     delete process.env.GOOGLE_CLIENT_ID;
     delete process.env.GOOGLE_CLIENT_SECRET;
-    delete process.env.LINKEDIN_CLIENT_ID;
-    delete process.env.LINKEDIN_CLIENT_SECRET;
 
     const app = { use: jest.fn() };
 

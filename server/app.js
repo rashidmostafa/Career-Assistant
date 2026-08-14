@@ -2,7 +2,7 @@ require("dotenv").config();
 /**
  * Career Assistant — Auth API Server
  * Node.js + Express + MongoDB + JWT + bcrypt + TOTP (speakeasy)
- * + Passport.js (Google / LinkedIn OAuth2) + Biometric token endpoints
+ * + Passport.js (Google OAuth2) + Biometric token endpoints
  *
  * Endpoints:
  *   POST   /api/auth/register
@@ -17,8 +17,6 @@ require("dotenv").config();
  *   POST   /api/auth/reset-password
  *   GET    /api/auth/google            -> Google OAuth redirect
  *   GET    /api/auth/google/callback   -> Google OAuth callback
- *   GET    /api/auth/linkedin          -> LinkedIn OAuth redirect
- *   GET    /api/auth/linkedin/callback -> LinkedIn OAuth callback
  *   POST   /api/auth/biometric/register (authenticated)
  *   POST   /api/auth/biometric/verify
  *   POST   /api/auth/biometric/disable (authenticated)

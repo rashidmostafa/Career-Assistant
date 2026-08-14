@@ -1,9 +1,9 @@
 /**
- * Passport.js configuration — Google OAuth2 + LinkedIn OAuth2.
+ * Passport.js configuration — Google OAuth2.
  *
- * Both strategies upsert the User record: if a matching social account
- * already exists the user is returned; otherwise a new account is created
- * with a random placeholder password (they can never log in with it).
+ * Upserts the User record: if a matching social account already exists the
+ * user is returned; otherwise a new account is created with a random
+ * placeholder password (they can never log in with it).
  *
  * Usage:
  *   const { initPassport } = require("./config/passport");
@@ -11,7 +11,6 @@
  */
 const passport     = require("passport");
 const GoogleStrategy  = require("passport-google-oauth20").Strategy;
-const LinkedInStrategy = require("passport-linkedin-oauth2").Strategy;
 const crypto       = require("crypto");
 const bcrypt       = require("bcryptjs");
 const User         = require("../models/User");
@@ -80,37 +79,6 @@ function buildGoogleStrategy() {
   );
 }
 
-// ── LinkedIn Strategy ─────────────────────────────────────────────────────────
-function buildLinkedInStrategy() {
-  const callbackURL = `${process.env.SERVER_BASE_URL}/api/auth/linkedin/callback`;
-  return new LinkedInStrategy(
-    {
-      clientID:     process.env.LINKEDIN_CLIENT_ID,
-      clientSecret: process.env.LINKEDIN_CLIENT_SECRET,
-      callbackURL,
-      scope: ["openid", "profile", "email"],
-    },
-    async (_accessToken, _refreshToken, profile, done) => {
-      try {
-        const email     = profile.emails?.[0]?.value;
-        const avatarUrl = profile.photos?.[0]?.value;
-        if (!email) return done(new Error("LinkedIn account has no email."));
-        const user = await upsertSocialUser({
-          provider:   "linkedin",
-          providerId: profile.id,
-          email,
-          name: profile.displayName ?? email.split("@")[0],
-          avatarUrl,
-        });
-        // FIX: was incorrectly passing `done` instead of `user`
-        done(null, user);
-      } catch (e) {
-        done(e);
-      }
-    }
-  );
-}
-
 // ── Passport session serialisation (minimal — we use JWT, not sessions) ───────
 passport.serializeUser((user, done) => done(null, user._id.toString()));
 passport.deserializeUser(async (id, done) => {
@@ -138,18 +106,11 @@ function initPassport(app) {
   }));
 
   const hasGoogleConfig = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
-  const hasLinkedInConfig = Boolean(process.env.LINKEDIN_CLIENT_ID && process.env.LINKEDIN_CLIENT_SECRET);
 
   if (hasGoogleConfig) {
     passport.use(buildGoogleStrategy());
   } else {
     console.warn("[Passport] Google OAuth not configured; skipping Google strategy.");
-  }
-
-  if (hasLinkedInConfig) {
-    passport.use(buildLinkedInStrategy());
-  } else {
-    console.warn("[Passport] LinkedIn OAuth not configured; skipping LinkedIn strategy.");
   }
 
   app.use(passport.initialize());

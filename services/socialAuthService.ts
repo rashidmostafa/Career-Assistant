@@ -14,7 +14,7 @@ export interface SocialAuthResult {
 
 export type AuthTokens = SocialAuthResult;
 
-async function openSocialAuth(provider: "google" | "linkedin"): Promise<SocialAuthResult> {
+async function openSocialAuth(provider: "google"): Promise<SocialAuthResult> {
   if (!BASE) {
     throw new Error("EXPO_PUBLIC_API_URL is not set.");
   }
@@ -64,8 +64,5 @@ async function openSocialAuth(provider: "google" | "linkedin"): Promise<SocialAu
 export const SocialAuthService = {
   async signInWithGoogle(): Promise<SocialAuthResult> {
     return openSocialAuth("google");
-  },
-  async signInWithLinkedIn(): Promise<SocialAuthResult> {
-    return openSocialAuth("linkedin");
   },
 };

@@ -1,32 +1,26 @@
 /**
- * Rate limiting middleware using an in-process LRU store.
- * Production: swap windowMs/max with express-rate-limit + Redis.
+ * Rate limiting middleware — express-rate-limit's built-in in-memory store.
+ * Production: swap for a Redis-backed store so limits survive restarts and
+ * work across multiple server instances.
  *
- * Limits:
- *  - Auth endpoints: 10 requests / hour per IP
- *  - Recovery:  3 attempts / day per IP
- *  - General:   100 requests / hour per IP
+ * Limits (keyed by device ID when available, IP as fallback — see
+ * rateLimitKey() below):
+ *  - Auth endpoints: 10 requests / hour
+ *  - Recovery:  3 attempts / day
+ *  - General:   100 requests / hour
  */
 const { rateLimit } = require("express-rate-limit");
 
-function makeStore() {
-  // Minimal in-memory store (express-rate-limit compatible)
-  const hits = new Map();
-  return {
-    increment: (key) => {
-      const now = Date.now();
-      const record = hits.get(key) ?? { count: 0, resetTime: now };
-      record.count += 1;
-      hits.set(key, record);
-      return { totalHits: record.count, resetTime: new Date(record.resetTime) };
-    },
-    decrement: (key) => {
-      const record = hits.get(key);
-      if (record && record.count > 0) record.count -= 1;
-    },
-    resetKey: (key) => hits.delete(key),
-    resetAll: () => hits.clear(),
-  };
+// Mobile carriers commonly rotate the client's visible public IP mid-session
+// (CGNAT) — keying purely on req.ip let a single device silently get a fresh
+// budget every time its IP changed. The app already sends a stable
+// X-Device-Id header (generated once and persisted in SecureStore) on every
+// request, so prefer that; fall back to IP only for clients that never send
+// one (e.g. a raw script hitting the API directly).
+function rateLimitKey(req, prefix = "") {
+  const deviceId = req.headers["x-device-id"];
+  const key = deviceId ? `device_${deviceId}` : (req.ip ?? "unknown");
+  return prefix ? `${prefix}_${key}` : key;
 }
 
 const authLimiter = rateLimit({
@@ -35,7 +29,7 @@ const authLimiter = rateLimit({
   message: { message: "Too many authentication attempts. Please try again in an hour." },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.ip ?? "unknown",
+  keyGenerator: (req) => rateLimitKey(req),
   skip: (req) => process.env.NODE_ENV === "test",
 });
 
@@ -45,7 +39,7 @@ const recoveryLimiter = rateLimit({
   message: { message: "Too many recovery attempts. Please try again tomorrow." },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => `recovery_${req.ip ?? "unknown"}`,
+  keyGenerator: (req) => rateLimitKey(req, "recovery"),
   skip: (req) => process.env.NODE_ENV === "test",
 });
 
@@ -55,6 +49,7 @@ const generalLimiter = rateLimit({
   message: { message: "Too many requests. Please slow down." },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => rateLimitKey(req),
   skip: (req) => process.env.NODE_ENV === "test",
 });
 

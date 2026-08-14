@@ -201,18 +201,20 @@ export const AuthApiService = {
   },
 
   // ── Recovery ──────────────────────────────────────────────────────────────────
-  async recoverAccount(payload: { email: string }): Promise<{ message: string }> {
+  // Field names must match server/services/authService.js exactly — it spreads
+  // req.body directly into each function, so a mismatched key silently sends
+  // `undefined` instead of a clear type error.
+  async recoverAccount(payload: { method: "email"; email: string }): Promise<{ message: string; userId?: string }> {
     if (!BASE) throw new Error("NO_BACKEND");
     return apiFetch("/api/auth/recover", { method: "POST", body: JSON.stringify(payload) });
   },
 
-  async verifyRecoveryOtp(payload: { email: string; otp: string }): Promise<{ recoveryToken: string }> {
+  async verifyRecoveryOtp(payload: { userId: string; otp: string }): Promise<{ message: string; recoveryToken: string }> {
     if (!BASE) throw new Error("NO_BACKEND");
     return apiFetch("/api/auth/verify-recovery-otp", { method: "POST", body: JSON.stringify(payload) });
   },
 
   async resetPassword(payload: {
-    email: string;
     recoveryToken: string;
     newPassword: string;
   }): Promise<{ message: string }> {
@@ -224,11 +226,6 @@ export const AuthApiService = {
   /** Returns the backend URL that starts the Google OAuth redirect flow. */
   getGoogleAuthUrl(): string {
     return `${BASE}/api/auth/google`;
-  },
-
-  /** Returns the backend URL that starts the LinkedIn OAuth redirect flow. */
-  getLinkedInAuthUrl(): string {
-    return `${BASE}/api/auth/linkedin`;
   },
 
   // ── Biometric ─────────────────────────────────────────────────────────────────
@@ -332,7 +329,7 @@ export const AuthApiService = {
     return apiFetch(`/api/user/sessions/${sessionId}`, { method: "DELETE" }, true);
   },
 
-  async getAuditLog(page = 1, limit = 20): Promise<{ logs: any[]; page: number; limit: number }> {
+  async getAuditLog(page = 1, limit = 20): Promise<{ logs: any[]; page: number; limit: number; total: number }> {
     if (!BASE) throw new Error("NO_BACKEND");
     return apiFetch(`/api/user/audit-log?page=${page}&limit=${limit}`, {}, true);
   },

@@ -5,9 +5,10 @@
  *           biometric login, security questions, consent, risk display.
  */
 import {
-  AlertCircle, ArrowLeft, CheckCircle, Eye, EyeOff,
-  Fingerprint, Lock, Mail, Phone, User as UserIcon, Shield,
+  AlertCircle, ArrowLeft, Eye, EyeOff,
+  Lock, Mail, Phone, User as UserIcon, Shield,
 } from "lucide-react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, { useCallback, useState } from "react";
@@ -23,10 +24,11 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { useThemeMode } from "@/context/ThemeContext";
 import { OtpInput } from "@/components/auth/OtpInput";
 import { PasswordStrengthBar } from "@/components/auth/PasswordStrengthBar";
 import { BiometricButton } from "@/components/auth/BiometricButton";
@@ -69,10 +71,12 @@ export default function AuthScreen() {
   const router   = useRouter();
   const colors   = useColors() as any;
   const insets   = useSafeAreaInsets();
+  const { resolvedTheme } = useThemeMode();
+  const isDarkMode = resolvedTheme === "dark";
   const {
     signIn, signUp, confirmEmailVerified, resendVerification,
     pendingVerificationEmail, pendingUserId, biometricAvailable,
-    biometricType, loginWithBiometric, setSecurityQuestions,
+    biometricType, setSecurityQuestions,
     loadUserFromServer,
   } = useAuth();
 
@@ -144,19 +148,16 @@ export default function AuthScreen() {
     setError(null);
     setLoading(true);
     try {
-      // Try the hook-based biometric login first (full server round-trip)
+      // A single real attempt — full server round-trip. There used to be a
+      // "fallback" retry here that called a second, near-identical biometric
+      // path, which meant any definitive server rejection (e.g. "Account is
+      // locked") triggered a pointless second native biometric prompt before
+      // showing the same error. One attempt, one prompt.
       const result = await biometric.login();
       if (result) {
-        // Same fix as autoPromptOnMount above — populate AuthContext.user
-        // before navigating, or AuthGate bounces straight back to /auth.
+        // Populate AuthContext.user before navigating, or AuthGate bounces
+        // straight back to /auth even though tokens are valid.
         await loadUserFromServer();
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-        router.replace("/(tabs)");
-        return;
-      }
-      // Fall back to legacy AuthContext biometric (already updates `user`)
-      const ok = await loginWithBiometric();
-      if (ok) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         router.replace("/(tabs)");
       } else {
@@ -167,7 +168,7 @@ export default function AuthScreen() {
     } finally {
       setLoading(false);
     }
-  }, [biometric, loginWithBiometric, loadUserFromServer, router]);
+  }, [biometric, loadUserFromServer, router]);
 
   // ── Register ─────────────────────────────────────────────────────────────────
   const handleRegister = useCallback(async () => {
@@ -266,244 +267,275 @@ export default function AuthScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 40 }]}
+        contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Back button (register → login) */}
-        {(mode === "register" || mode === "verify-otp" || mode === "security-questions") && (
-          <TouchableOpacity
-            style={styles.backBtn}
-            onPress={mode === "register" ? goLogin : mode === "verify-otp" ? goRegister : goLogin}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <ArrowLeft size={22} color={colors.foreground} />
-          </TouchableOpacity>
-        )}
+        {/* Gradient hero brand header */}
+        <View style={[styles.hero, { paddingTop: insets.top + 24 }]}>
+          <LinearGradient
+            colors={
+              isDarkMode
+                ? ["#0b1223", "#111827", colors.background]
+                : ["#eef2ff", "#fff", colors.background]
+            }
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.heroGradient}
+          />
+          <View style={[styles.heroBlob, styles.heroBlobOne, { backgroundColor: (colors.primary || "#2563eb") + "26" }]} />
+          <View style={[styles.heroBlob, styles.heroBlobTwo, { backgroundColor: (colors.jobs || "#7c3aed") + "1e" }]} />
 
-        {/* Logo / brand */}
-        <Animated.View entering={FadeInDown.duration(400)} style={styles.brand}>
-          <View style={[styles.logoCircle, { backgroundColor: colors.primary + "18" }]}>
-            <Shield size={36} color={colors.primary} />
-          </View>
-          <Text style={[styles.appName, { color: colors.foreground }]}>Career Assistant</Text>
-        </Animated.View>
-
-        {/* ── LOGIN ── */}
-        {mode === "login" && (
-          <Animated.View entering={FadeInDown.duration(350).delay(80)}>
-            <Text style={[styles.title, { color: colors.foreground }]}>Welcome back</Text>
-            <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Sign in to continue your journey</Text>
-
-            {/* Biometric */}
-            {biometricAvailable && (
-              <View style={{ marginBottom: 16 }}>
-                <BiometricButton
-                  type={biometricType}
-                  onPress={handleBiometricLogin}
-                  loading={loading}
-                />
-                <Divider colors={colors} label="or sign in with email" />
-              </View>
-            )}
-
-            <Field
-              icon={<Mail size={18} color={colors.mutedForeground} />}
-              placeholder="Email address"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              colors={colors}
-              accessibilityLabel="Email address"
-            />
-            {typoHint && (
-              <TouchableOpacity onPress={() => setEmail(typoHint)} style={styles.typoHint}>
-                <Text style={[styles.typoText, { color: colors.primary }]}>
-                  Did you mean {typoHint}?
-                </Text>
-              </TouchableOpacity>
-            )}
-            <PasswordField
-              value={password}
-              onChangeText={setPassword}
-              show={showPw}
-              onToggleShow={() => setShowPw((v) => !v)}
-              colors={colors}
-              placeholder="Password"
-            />
-
-            {error && <ErrorBanner message={error} />}
-
-            <PrimaryButton label="Sign In" onPress={handleLogin} loading={loading} color={colors.primary} />
-
-            {/* Social login placeholders */}
-            <Divider colors={colors} label="or continue with" />
-            <SocialRow colors={colors} />
-
-            <View style={styles.switchRow}>
-              <Text style={[styles.switchText, { color: colors.mutedForeground }]}>Don't have an account? </Text>
-              <TouchableOpacity onPress={goRegister} accessibilityRole="button">
-                <Text style={[styles.switchLink, { color: colors.primary }]}>Create one</Text>
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
-        )}
-
-        {/* ── REGISTER ── */}
-        {mode === "register" && (
-          <Animated.View entering={FadeInDown.duration(350)}>
-            <Text style={[styles.title, { color: colors.foreground }]}>Create account</Text>
-            <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Start your career journey today</Text>
-
-            <Field icon={<UserIcon size={18} color={colors.mutedForeground} />}
-              placeholder="Full name" value={name} onChangeText={setName}
-              colors={colors} accessibilityLabel="Full name" />
-
-            <Field icon={<Mail size={18} color={colors.mutedForeground} />}
-              placeholder="Email address" value={email} onChangeText={setEmail}
-              keyboardType="email-address" autoCapitalize="none"
-              colors={colors} accessibilityLabel="Email address" />
-            {typoHint && (
-              <TouchableOpacity onPress={() => setEmail(typoHint)} style={styles.typoHint}>
-                <Text style={[styles.typoText, { color: colors.primary }]}>Did you mean {typoHint}?</Text>
-              </TouchableOpacity>
-            )}
-
-            <Field icon={<Phone size={18} color={colors.mutedForeground} />}
-              placeholder="Phone (optional)" value={phone} onChangeText={setPhone}
-              keyboardType="phone-pad"
-              colors={colors} accessibilityLabel="Phone number (optional)" />
-
-            <PasswordField value={password} onChangeText={setPassword}
-              show={showPw} onToggleShow={() => setShowPw((v) => !v)}
-              colors={colors} placeholder="Password (8+ characters)" />
-
-            <PasswordStrengthBar password={password} rules={pwRules} />
-
-            <PasswordField value={confirmPw} onChangeText={setConfirmPw}
-              show={showConfirmPw} onToggleShow={() => setShowConfirmPw((v) => !v)}
-              colors={colors} placeholder="Confirm password" />
-
-            {confirmPw.length > 0 && confirmPw !== password && (
-              <Text style={[styles.mismatch, { color: "#ef4444" }]}>Passwords do not match.</Text>
-            )}
-
-            {/* Consent */}
+          {(mode === "register" || mode === "verify-otp" || mode === "security-questions") && (
             <TouchableOpacity
-              style={styles.consentRow}
-              onPress={() => setConsentGiven((v) => !v)}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: consentGiven }}
-            >
-              <View style={[styles.checkbox, { borderColor: consentGiven ? colors.primary : colors.border, backgroundColor: consentGiven ? colors.primary : "transparent" }]}>
-                {consentGiven && <Text style={{ color: "#fff", fontSize: 12, lineHeight: 16 }}>✓</Text>}
-              </View>
-              <Text style={[styles.consentText, { color: colors.mutedForeground }]}>
-                I agree to the{" "}
-                <Text style={{ color: colors.primary }}>Privacy Policy</Text>
-                {" "}and{" "}
-                <Text style={{ color: colors.primary }}>Terms of Service</Text>
-                {" "}(GDPR compliant)
-              </Text>
-            </TouchableOpacity>
-
-            {error && <ErrorBanner message={error} />}
-
-            <PrimaryButton label="Create Account" onPress={handleRegister} loading={loading} color={colors.primary}
-              disabled={!pwValid || !consentGiven} />
-
-            <View style={styles.switchRow}>
-              <Text style={[styles.switchText, { color: colors.mutedForeground }]}>Already have an account? </Text>
-              <TouchableOpacity onPress={goLogin} accessibilityRole="button">
-                <Text style={[styles.switchLink, { color: colors.primary }]}>Sign in</Text>
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
-        )}
-
-        {/* ── OTP VERIFY ── */}
-        {mode === "verify-otp" && (
-          <Animated.View entering={FadeInDown.duration(350)}>
-            <Text style={[styles.title, { color: colors.foreground }]}>Verify your email</Text>
-            <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-              We sent a 6-digit code to{"\n"}
-              <Text style={{ color: colors.foreground, fontFamily: "Inter_700Bold" }}>
-                {pendingVerificationEmail ?? email}
-              </Text>
-            </Text>
-
-            <View style={styles.otpWrap}>
-              <OtpInput onComplete={handleOtpComplete} hasError={otpError} disabled={loading} />
-            </View>
-
-            {loading && <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} />}
-            {error && <ErrorBanner message={error} />}
-
-            <View style={styles.resendRow}>
-              <Text style={[styles.switchText, { color: colors.mutedForeground }]}>Didn't receive it? </Text>
-              <TouchableOpacity
-                onPress={handleResendOtp}
-                disabled={resendCooldown > 0 || resendLoading}
-                accessibilityRole="button"
-                accessibilityLabel={resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend code"}
-              >
-                <Text style={[styles.switchLink, { color: (resendCooldown > 0 || resendLoading) ? colors.mutedForeground : colors.primary }]}>
-                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : resendLoading ? "Sending…" : "Resend code"}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={[styles.infoCard, { backgroundColor: otpTimer <= 60 && otpTimer > 0 ? "#ef444418" : otpTimer === 0 ? "#ef444418" : colors.accent, borderColor: otpTimer <= 60 && otpTimer > 0 ? "#ef4444" : colors.border }]}>
-              {otpTimer > 0 ? (
-                <View style={{ alignItems: "center" }}>
-                  <Text style={[styles.infoText, { color: otpTimer <= 60 ? "#ef4444" : colors.accentForeground, textAlign: "center" }]}>
-                    {otpTimer <= 60 ? "⚠️" : "🔒"} Code expires in{" "}
-                    <Text style={{ fontFamily: "Inter_700Bold" }}>
-                      {String(Math.floor(otpTimer / 60)).padStart(2, "0")}:{String(otpTimer % 60).padStart(2, "0")}
-                    </Text>
-                  </Text>
-                  <View style={{ width: "100%", height: 4, backgroundColor: colors.border, borderRadius: 2, marginTop: 10 }}>
-                    <View style={{
-                      width: `${(otpTimer / 600) * 100}%`,
-                      height: 4,
-                      backgroundColor: otpTimer <= 60 ? "#ef4444" : otpTimer <= 180 ? "#f59e0b" : "#6366f1",
-                      borderRadius: 2,
-                    }} />
-                  </View>
-                </View>
-              ) : (
-                <Text style={[styles.infoText, { color: "#ef4444", textAlign: "center" }]}>
-                  ⏰ Code expired. Please request a new one.
-                </Text>
-              )}
-            </View>
-          </Animated.View>
-        )}
-
-        {/* ── SECURITY QUESTIONS ── */}
-        {mode === "security-questions" && (
-          <Animated.View entering={FadeInDown.duration(350)}>
-            <Text style={[styles.title, { color: colors.foreground }]}>Security questions</Text>
-            <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-              These help you recover your account and provide backup authentication.
-            </Text>
-            <SecurityQuestionsForm
-              onSubmit={handleSecurityQuestions}
-              loading={loading}
-              count={3}
-            />
-            <TouchableOpacity
-              style={styles.skipBtn}
-              onPress={() => router.replace("/onboarding")}
+              style={styles.backBtn}
+              onPress={mode === "register" ? goLogin : mode === "verify-otp" ? goRegister : goLogin}
               accessibilityRole="button"
-              accessibilityLabel="Skip security questions"
+              accessibilityLabel="Go back"
             >
-              <Text style={[styles.skipText, { color: colors.mutedForeground }]}>Skip for now</Text>
+              <ArrowLeft size={22} color={colors.foreground} />
             </TouchableOpacity>
+          )}
+
+          <Animated.View entering={FadeInDown.duration(500).springify().damping(14)} style={styles.brand}>
+            <View style={[styles.logoCircle, { backgroundColor: colors.primary + "18", borderColor: colors.primary + "30" }]}>
+              <Shield size={32} color={colors.primary} strokeWidth={2.2} />
+            </View>
+            <Text style={[styles.appName, { color: colors.foreground }]}>Career Assistant</Text>
           </Animated.View>
-        )}
+        </View>
+
+        <View style={styles.body}>
+          {/* ── LOGIN ── */}
+          {mode === "login" && (
+            <Animated.View entering={FadeInDown.duration(400).delay(60).springify().damping(14)}>
+              <Text style={[styles.title, { color: colors.foreground }]}>Welcome back</Text>
+              <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Sign in to continue your journey</Text>
+
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                {/* Biometric */}
+                {biometricAvailable && (
+                  <View style={{ marginBottom: 4 }}>
+                    <BiometricButton
+                      type={biometricType}
+                      onPress={handleBiometricLogin}
+                      loading={loading}
+                    />
+                    <Divider colors={colors} label="or sign in with email" />
+                  </View>
+                )}
+
+                <Field
+                  icon={<Mail size={16} color={colors.primary} />}
+                  placeholder="Email address"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  colors={colors}
+                  accessibilityLabel="Email address"
+                />
+                {typoHint && (
+                  <TouchableOpacity onPress={() => setEmail(typoHint)} style={styles.typoHint}>
+                    <Text style={[styles.typoText, { color: colors.primary }]}>
+                      Did you mean {typoHint}?
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                <PasswordField
+                  value={password}
+                  onChangeText={setPassword}
+                  show={showPw}
+                  onToggleShow={() => setShowPw((v) => !v)}
+                  colors={colors}
+                  placeholder="Password"
+                />
+
+                <TouchableOpacity
+                  style={styles.forgotPwLink}
+                  onPress={() => router.push("/auth-recover")}
+                  accessibilityRole="button" accessibilityLabel="Forgot password">
+                  <Text style={[styles.switchLink, { color: colors.primary }]}>Forgot password?</Text>
+                </TouchableOpacity>
+
+                {error && <ErrorBanner message={error} />}
+
+                <PrimaryButton label="Sign In" onPress={handleLogin} loading={loading} color={colors.primary} />
+
+                {/* Social login */}
+                <Divider colors={colors} label="or continue with" />
+                <SocialRow colors={colors} />
+              </View>
+
+              <View style={styles.switchRow}>
+                <Text style={[styles.switchText, { color: colors.mutedForeground }]}>Don't have an account? </Text>
+                <TouchableOpacity onPress={goRegister} accessibilityRole="button">
+                  <Text style={[styles.switchLink, { color: colors.primary }]}>Create one</Text>
+                </TouchableOpacity>
+              </View>
+            </Animated.View>
+          )}
+
+          {/* ── REGISTER ── */}
+          {mode === "register" && (
+            <Animated.View entering={FadeInDown.duration(400).springify().damping(14)}>
+              <Text style={[styles.title, { color: colors.foreground }]}>Create account</Text>
+              <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Start your career journey today</Text>
+
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Field icon={<UserIcon size={16} color={colors.primary} />}
+                  placeholder="Full name" value={name} onChangeText={setName}
+                  colors={colors} accessibilityLabel="Full name" />
+
+                <Field icon={<Mail size={16} color={colors.primary} />}
+                  placeholder="Email address" value={email} onChangeText={setEmail}
+                  keyboardType="email-address" autoCapitalize="none"
+                  colors={colors} accessibilityLabel="Email address" />
+                {typoHint && (
+                  <TouchableOpacity onPress={() => setEmail(typoHint)} style={styles.typoHint}>
+                    <Text style={[styles.typoText, { color: colors.primary }]}>Did you mean {typoHint}?</Text>
+                  </TouchableOpacity>
+                )}
+
+                <Field icon={<Phone size={16} color={colors.primary} />}
+                  placeholder="Phone (optional)" value={phone} onChangeText={setPhone}
+                  keyboardType="phone-pad"
+                  colors={colors} accessibilityLabel="Phone number (optional)" />
+
+                <PasswordField value={password} onChangeText={setPassword}
+                  show={showPw} onToggleShow={() => setShowPw((v) => !v)}
+                  colors={colors} placeholder="Password (8+ characters)" />
+
+                <PasswordStrengthBar password={password} rules={pwRules} />
+
+                <PasswordField value={confirmPw} onChangeText={setConfirmPw}
+                  show={showConfirmPw} onToggleShow={() => setShowConfirmPw((v) => !v)}
+                  colors={colors} placeholder="Confirm password" />
+
+                {confirmPw.length > 0 && confirmPw !== password && (
+                  <Text style={[styles.mismatch, { color: "#ef4444" }]}>Passwords do not match.</Text>
+                )}
+
+                {/* Consent */}
+                <TouchableOpacity
+                  style={styles.consentRow}
+                  onPress={() => setConsentGiven((v) => !v)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: consentGiven }}
+                >
+                  <View style={[styles.checkbox, { borderColor: consentGiven ? colors.primary : colors.border, backgroundColor: consentGiven ? colors.primary : "transparent" }]}>
+                    {consentGiven && <Text style={{ color: "#fff", fontSize: 12, lineHeight: 16 }}>✓</Text>}
+                  </View>
+                  <Text style={[styles.consentText, { color: colors.mutedForeground }]}>
+                    I agree to the{" "}
+                    <Text style={{ color: colors.primary }}>Privacy Policy</Text>
+                    {" "}and{" "}
+                    <Text style={{ color: colors.primary }}>Terms of Service</Text>
+                    {" "}(GDPR compliant)
+                  </Text>
+                </TouchableOpacity>
+
+                {error && <ErrorBanner message={error} />}
+
+                <PrimaryButton label="Create Account" onPress={handleRegister} loading={loading} color={colors.primary}
+                  disabled={!pwValid || !consentGiven} />
+              </View>
+
+              <View style={styles.switchRow}>
+                <Text style={[styles.switchText, { color: colors.mutedForeground }]}>Already have an account? </Text>
+                <TouchableOpacity onPress={goLogin} accessibilityRole="button">
+                  <Text style={[styles.switchLink, { color: colors.primary }]}>Sign in</Text>
+                </TouchableOpacity>
+              </View>
+            </Animated.View>
+          )}
+
+          {/* ── OTP VERIFY ── */}
+          {mode === "verify-otp" && (
+            <Animated.View entering={FadeInDown.duration(400).springify().damping(14)}>
+              <Text style={[styles.title, { color: colors.foreground }]}>Verify your email</Text>
+              <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
+                We sent a 6-digit code to{"\n"}
+                <Text style={{ color: colors.foreground, fontFamily: "Inter_700Bold" }}>
+                  {pendingVerificationEmail ?? email}
+                </Text>
+              </Text>
+
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: "center" }]}>
+                <View style={styles.otpWrap}>
+                  <OtpInput onComplete={handleOtpComplete} hasError={otpError} disabled={loading} />
+                </View>
+
+                {loading && <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} />}
+                {error && <ErrorBanner message={error} />}
+
+                <View style={styles.resendRow}>
+                  <Text style={[styles.switchText, { color: colors.mutedForeground }]}>Didn't receive it? </Text>
+                  <TouchableOpacity
+                    onPress={handleResendOtp}
+                    disabled={resendCooldown > 0 || resendLoading}
+                    accessibilityRole="button"
+                    accessibilityLabel={resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend code"}
+                  >
+                    <Text style={[styles.switchLink, { color: (resendCooldown > 0 || resendLoading) ? colors.mutedForeground : colors.primary }]}>
+                      {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : resendLoading ? "Sending…" : "Resend code"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={[styles.infoCard, { backgroundColor: otpTimer <= 60 && otpTimer > 0 ? "#ef444418" : otpTimer === 0 ? "#ef444418" : colors.accent, borderColor: otpTimer <= 60 && otpTimer > 0 ? "#ef4444" : colors.border }]}>
+                  {otpTimer > 0 ? (
+                    <View style={{ alignItems: "center" }}>
+                      <Text style={[styles.infoText, { color: otpTimer <= 60 ? "#ef4444" : colors.accentForeground, textAlign: "center" }]}>
+                        {otpTimer <= 60 ? "⚠️" : "🔒"} Code expires in{" "}
+                        <Text style={{ fontFamily: "Inter_700Bold" }}>
+                          {String(Math.floor(otpTimer / 60)).padStart(2, "0")}:{String(otpTimer % 60).padStart(2, "0")}
+                        </Text>
+                      </Text>
+                      <View style={{ width: "100%", height: 4, backgroundColor: colors.border, borderRadius: 2, marginTop: 10 }}>
+                        <View style={{
+                          width: `${(otpTimer / 600) * 100}%`,
+                          height: 4,
+                          backgroundColor: otpTimer <= 60 ? "#ef4444" : otpTimer <= 180 ? "#f59e0b" : colors.primary,
+                          borderRadius: 2,
+                        }} />
+                      </View>
+                    </View>
+                  ) : (
+                    <Text style={[styles.infoText, { color: "#ef4444", textAlign: "center" }]}>
+                      ⏰ Code expired. Please request a new one.
+                    </Text>
+                  )}
+                </View>
+              </View>
+            </Animated.View>
+          )}
+
+          {/* ── SECURITY QUESTIONS ── */}
+          {mode === "security-questions" && (
+            <Animated.View entering={FadeInDown.duration(400).springify().damping(14)}>
+              <Text style={[styles.title, { color: colors.foreground }]}>Security questions</Text>
+              <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
+                These help you recover your account and provide backup authentication.
+              </Text>
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <SecurityQuestionsForm
+                  onSubmit={handleSecurityQuestions}
+                  loading={loading}
+                  count={3}
+                />
+              </View>
+              <TouchableOpacity
+                style={styles.skipBtn}
+                onPress={() => router.replace("/onboarding")}
+                accessibilityRole="button"
+                accessibilityLabel="Skip security questions"
+              >
+                <Text style={[styles.skipText, { color: colors.mutedForeground }]}>Skip for now</Text>
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -512,8 +544,8 @@ export default function AuthScreen() {
 // ─── Sub-components ────────────────────────────────────────────────────────────
 function Field({ icon, placeholder, value, onChangeText, keyboardType, autoCapitalize, colors, accessibilityLabel }: any) {
   return (
-    <View style={[fieldStyles.wrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-      {icon}
+    <View style={[fieldStyles.wrap, { backgroundColor: colors.background, borderColor: colors.border }]}>
+      <View style={[fieldStyles.iconWrap, { backgroundColor: colors.primary + "14" }]}>{icon}</View>
       <TextInput
         style={[fieldStyles.input, { color: colors.foreground }]}
         placeholder={placeholder}
@@ -530,8 +562,10 @@ function Field({ icon, placeholder, value, onChangeText, keyboardType, autoCapit
 
 function PasswordField({ value, onChangeText, show, onToggleShow, colors, placeholder }: any) {
   return (
-    <View style={[fieldStyles.wrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-      <Lock size={18} color={colors.mutedForeground} />
+    <View style={[fieldStyles.wrap, { backgroundColor: colors.background, borderColor: colors.border }]}>
+      <View style={[fieldStyles.iconWrap, { backgroundColor: colors.primary + "14" }]}>
+        <Lock size={16} color={colors.primary} />
+      </View>
       <TextInput
         style={[fieldStyles.input, { color: colors.foreground }]}
         placeholder={placeholder ?? "Password"}
@@ -553,9 +587,10 @@ function PasswordField({ value, onChangeText, show, onToggleShow, colors, placeh
 function PrimaryButton({ label, onPress, loading, color, disabled }: any) {
   return (
     <TouchableOpacity
-      style={[styles.primaryBtn, { backgroundColor: color, opacity: disabled || loading ? 0.5 : 1 }]}
+      style={[styles.primaryBtn, { backgroundColor: color, opacity: disabled || loading ? 0.5 : 1, shadowColor: color }]}
       onPress={onPress}
       disabled={disabled || loading}
+      activeOpacity={0.88}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ busy: loading, disabled }}
@@ -589,8 +624,7 @@ function Divider({ colors, label }: any) {
 
 function SocialRow({ colors }: any) {
   const router = useRouter();
-  const [googleLoading,   setGoogleLoading]   = React.useState(false);
-  const [linkedinLoading, setLinkedinLoading] = React.useState(false);
+  const [googleLoading, setGoogleLoading] = React.useState(false);
 
   const handleGoogle = async () => {
     setGoogleLoading(true);
@@ -607,27 +641,13 @@ function SocialRow({ colors }: any) {
     }
   };
 
-  const handleLinkedIn = async () => {
-    setLinkedinLoading(true);
-    try {
-      await SocialAuthService.signInWithLinkedIn();
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      router.replace("/(tabs)");
-    } catch (e: any) {
-      if (e?.message !== "Sign-in was cancelled.") {
-        Alert.alert("LinkedIn Sign-In Failed", e?.message ?? "Please try again.");
-      }
-    } finally {
-      setLinkedinLoading(false);
-    }
-  };
-
   return (
     <View style={styles.socialRow}>
       <TouchableOpacity
-        style={[styles.socialBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
+        style={[styles.socialBtn, { borderColor: colors.border, backgroundColor: colors.background }]}
         onPress={handleGoogle}
-        disabled={googleLoading || linkedinLoading}
+        disabled={googleLoading}
+        activeOpacity={0.85}
         accessibilityRole="button"
         accessibilityLabel="Continue with Google"
       >
@@ -636,22 +656,7 @@ function SocialRow({ colors }: any) {
         ) : (
           <Text style={styles.socialEmoji}>G</Text>
         )}
-        <Text style={[styles.socialLabel, { color: colors.foreground }]}>Google</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={[styles.socialBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
-        onPress={handleLinkedIn}
-        disabled={googleLoading || linkedinLoading}
-        accessibilityRole="button"
-        accessibilityLabel="Continue with LinkedIn"
-      >
-        {linkedinLoading ? (
-          <ActivityIndicator size="small" color={colors.foreground} />
-        ) : (
-          <Text style={styles.socialEmoji}>in</Text>
-        )}
-        <Text style={[styles.socialLabel, { color: colors.foreground }]}>LinkedIn</Text>
+        <Text style={[styles.socialLabel, { color: colors.foreground }]}>Continue with Google</Text>
       </TouchableOpacity>
     </View>
   );
@@ -660,45 +665,54 @@ function SocialRow({ colors }: any) {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  scroll: { paddingHorizontal: 24 },
-  backBtn: { marginBottom: 8, alignSelf: "flex-start", padding: 4 },
-  brand: { alignItems: "center", marginBottom: 28 },
-  logoCircle: { width: 72, height: 72, borderRadius: 36, alignItems: "center", justifyContent: "center", marginBottom: 12 },
-  appName: { fontFamily: "Inter_700Bold", fontSize: 22, letterSpacing: -0.5 },
-  title: { fontFamily: "Inter_700Bold", fontSize: 28, letterSpacing: -0.7, marginBottom: 6 },
-  subtitle: { fontFamily: "Inter_500Medium", fontSize: 15, lineHeight: 23, marginBottom: 24, color: "#888" },
-  primaryBtn: { borderRadius: 16, paddingVertical: 17, alignItems: "center", marginTop: 8, marginBottom: 12 },
+  scroll: { flexGrow: 1 },
+  hero: { paddingBottom: 20, position: "relative", overflow: "hidden" },
+  heroGradient: { ...StyleSheet.absoluteFillObject },
+  heroBlob: { position: "absolute", borderRadius: 999 },
+  heroBlobOne: { width: 160, height: 160, right: -34, top: 4 },
+  heroBlobTwo: { width: 110, height: 110, left: -30, top: 60 },
+  backBtn: { marginLeft: 20, marginBottom: 4, alignSelf: "flex-start", padding: 4 },
+  brand: { alignItems: "center", paddingTop: 8, paddingBottom: 4 },
+  logoCircle: { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center", marginBottom: 12, borderWidth: 1 },
+  appName: { fontFamily: "Inter_700Bold", fontSize: 20, letterSpacing: -0.4 },
+  body: { paddingHorizontal: 24, paddingBottom: 40 },
+  title: { fontFamily: "Inter_700Bold", fontSize: 26, letterSpacing: -0.6, marginBottom: 6, marginTop: 20 },
+  subtitle: { fontFamily: "Inter_500Medium", fontSize: 14, lineHeight: 21, marginBottom: 20 },
+  card: { borderRadius: 24, borderWidth: 1, padding: 20, marginBottom: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.05, shadowRadius: 12, elevation: 2 },
+  primaryBtn: { borderRadius: 16, paddingVertical: 16, alignItems: "center", marginTop: 6, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.22, shadowRadius: 14, elevation: 4 },
   primaryBtnText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 16 },
   divider: { flexDirection: "row", alignItems: "center", marginVertical: 16, gap: 10 },
   dividerLine: { flex: 1, height: 1 },
   dividerLabel: { fontFamily: "Inter_500Medium", fontSize: 12 },
-  socialRow: { flexDirection: "row", gap: 12, marginBottom: 12 },
-  socialBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1, borderRadius: 14, paddingVertical: 13 },
-  socialEmoji: { fontSize: 18 },
+  socialRow: { flexDirection: "row", gap: 12 },
+  socialBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1, borderRadius: 14, paddingVertical: 14 },
+  socialEmoji: { fontSize: 16, fontFamily: "Inter_700Bold" },
   socialLabel: { fontFamily: "Inter_600SemiBold", fontSize: 14 },
-  switchRow: { flexDirection: "row", justifyContent: "center", marginTop: 8 },
+  forgotPwLink: { alignSelf: "flex-end", marginTop: 8, marginBottom: 4 },
+  switchRow: { flexDirection: "row", justifyContent: "center", marginTop: 20 },
   switchText: { fontFamily: "Inter_500Medium", fontSize: 14 },
   switchLink: { fontFamily: "Inter_700Bold", fontSize: 14 },
   typoHint: { marginTop: -4, marginBottom: 8, paddingLeft: 4 },
   typoText: { fontFamily: "Inter_500Medium", fontSize: 13 },
   mismatch: { fontFamily: "Inter_500Medium", fontSize: 12, marginBottom: 6 },
-  otpWrap: { marginVertical: 24 },
+  otpWrap: { marginTop: 4, marginBottom: 8 },
   resendRow: { flexDirection: "row", justifyContent: "center", marginBottom: 16 },
-  infoCard: { borderRadius: 14, borderWidth: 1, padding: 14 },
+  infoCard: { borderRadius: 14, borderWidth: 1, padding: 14, width: "100%" },
   infoText: { fontFamily: "Inter_500Medium", fontSize: 13, lineHeight: 20 },
   consentRow: { flexDirection: "row", alignItems: "flex-start", gap: 12, marginVertical: 14 },
   checkbox: { width: 20, height: 20, borderRadius: 6, borderWidth: 2, alignItems: "center", justifyContent: "center", marginTop: 1 },
   consentText: { flex: 1, fontFamily: "Inter_500Medium", fontSize: 13, lineHeight: 20 },
-  skipBtn: { alignItems: "center", paddingVertical: 14 },
+  skipBtn: { alignItems: "center", paddingVertical: 16 },
   skipText: { fontFamily: "Inter_500Medium", fontSize: 14 },
 });
 
 const fieldStyles = StyleSheet.create({
-  wrap: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 14, marginBottom: 12, gap: 10 },
-  input: { flex: 1, fontFamily: "Inter_500Medium", fontSize: 15 },
+  wrap: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 4, marginBottom: 12, gap: 10 },
+  iconWrap: { width: 30, height: 30, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  input: { flex: 1, fontFamily: "Inter_500Medium", fontSize: 15, paddingVertical: 12 },
 });
 
 const errStyles = StyleSheet.create({
-  wrap: { flexDirection: "row", alignItems: "flex-start", gap: 8, backgroundColor: "#ef444418", borderRadius: 10, padding: 12, marginBottom: 10 },
+  wrap: { flexDirection: "row", alignItems: "flex-start", gap: 8, backgroundColor: "#ef444418", borderRadius: 10, padding: 12, marginBottom: 10, marginTop: 4 },
   text: { flex: 1, color: "#ef4444", fontFamily: "Inter_500Medium", fontSize: 13, lineHeight: 20 },
 });

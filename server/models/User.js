@@ -3,7 +3,7 @@
  * bcrypt 12 rounds for password storage.
  * Includes: 2FA, biometric, security questions, session tracking,
  *           risk profile, account lockout, GDPR consent,
- *           social OAuth (Google / LinkedIn), push notifications.
+ *           social OAuth (Google), push notifications.
  */
 const mongoose = require("mongoose");
 const bcrypt   = require("bcryptjs");
@@ -21,7 +21,7 @@ const UserSchema = new mongoose.Schema({
   passwordHash: { type: String, required: true },
 
   // ── Social OAuth ──────────────────────────────────────────────────────────
-  provider:   { type: String, enum: ["local", "google", "linkedin"], default: "local" },
+  provider:   { type: String, enum: ["local", "google"], default: "local" },
   providerId: { type: String },        // provider's user ID
   avatarUrl:  { type: String },        // avatar from social profile
 

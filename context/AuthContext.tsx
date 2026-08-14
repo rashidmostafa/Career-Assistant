@@ -96,7 +96,7 @@ export interface AuthContextType {
   verifySecurityAnswers: (answers: Array<{ question: string; answer: string }>) => Promise<boolean>;
   getSecurityQuestions: () => Promise<string[]>;
   // ── Social auth ───────────────────────────────────────────────────────────────
-  signInWithSocial: (provider: "google" | "linkedin") => Promise<void>;
+  signInWithSocial: (provider: "google") => Promise<void>;
   loadUserFromServer: () => Promise<void>;
   // ── GDPR ─────────────────────────────────────────────────────────────────────
   exportData: () => Promise<object>;
@@ -526,10 +526,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ── Social sign-in ────────────────────────────────────────────────────────────
   // SocialAuthService handles the OAuth flow and token persistence; once tokens
   // land we just need to load the live profile.
-  const signInWithSocial = useCallback(async (provider: "google" | "linkedin") => {
+  const signInWithSocial = useCallback(async (provider: "google") => {
     // Lazy-import to avoid bundling expo-web-browser unless social login is used.
     const { SocialAuthService } = await import("@/services/socialAuthService");
-    await SocialAuthService[provider === "google" ? "signInWithGoogle" : "signInWithLinkedIn"]();
+    await SocialAuthService.signInWithGoogle();
     const profile = await AuthApiService.getProfile();
     if (profile?.user) await persistUser(mapServerUser(profile.user));
   }, []);

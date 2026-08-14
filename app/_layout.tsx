@@ -32,12 +32,13 @@ function AuthGate({ children, isOAuthLoading }: { children: React.ReactNode; isO
     // Don't redirect while OAuth callback is loading user profile
     if (isOAuthLoading?.current) return;
 
-    // "auth-2fa" is a sibling route (app/auth-2fa.tsx), not nested under
-    // "auth" — segments[0] === "auth" alone missed it, so the gate was
-    // bouncing users straight back to /auth the instant login pushed them
-    // to the 2FA screen (require2FA responses leave `user` still null until
-    // the code is verified).
-    const inAuth       = segments[0] === "auth" || segments[0] === "auth-2fa";
+    // "auth-2fa" and "auth-recover" are sibling routes (app/auth-2fa.tsx,
+    // app/auth-recover.tsx), not nested under "auth" — segments[0] === "auth"
+    // alone missed them, so the gate was bouncing users straight back to
+    // /auth the instant they navigated there (both screens are used while
+    // `user` is still null — mid-2FA-challenge or recovering a forgotten
+    // password before ever signing in).
+    const inAuth       = segments[0] === "auth" || segments[0] === "auth-2fa" || segments[0] === "auth-recover";
     const inOnboarding = segments[0] === "onboarding";
     const inReauth     = (segments as string[]).some((s) => s === "auth-reauth");
     const inTabs       = segments[0] === "(tabs)";
@@ -174,6 +175,9 @@ function RootLayoutNav() {
                   <Stack.Screen name="auth-2fa"      options={{ headerShown: false, presentation: "modal" }} />
                   <Stack.Screen name="auth-reauth"   options={{ headerShown: false, presentation: "modal" }} />
                   <Stack.Screen name="auth-security" options={{ headerShown: false }} />
+                  <Stack.Screen name="auth-recover"  options={{ headerShown: false, presentation: "modal" }} />
+                  <Stack.Screen name="auth-sessions"  options={{ headerShown: false }} />
+                  <Stack.Screen name="auth-audit-log" options={{ headerShown: false }} />
                   <Stack.Screen name="onboarding"    options={{ headerShown: false }} />
                 </Stack>
               </AuthGate>

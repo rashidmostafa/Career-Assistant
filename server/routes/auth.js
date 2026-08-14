@@ -1,7 +1,7 @@
 /**
  * Auth routes — /api/auth/*
  * Includes: register, email OTP, login, 2FA, refresh, logout,
- *           reauth, recovery, reset-password, Google/LinkedIn OAuth,
+ *           reauth, recovery, reset-password, Google OAuth,
  *           and biometric register/verify/disable.
  *
  * OAuth deep-link fix for Expo Go:
@@ -261,49 +261,6 @@ router.get("/google/callback",
       res.redirect(redirectUrl);
     } catch (e) {
       console.error("[OAuth/Google] Session issue error:", e);
-      const fallback = req.session.oauthRedirectUri ?? `${process.env.APP_DEEP_LINK ?? "career-assistant://"}oauth/error`;
-      delete req.session.oauthRedirectUri;
-      res.redirect(fallback.includes("?") ? `${fallback}&error=auth_failed` : `${fallback}?error=auth_failed`);
-    }
-  }
-);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LinkedIn OAuth2
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Step 1 — Redirect to LinkedIn.
- * Same redirectUri session-storage pattern as Google above.
- */
-router.get("/linkedin", (req, res, next) => {
-  if (req.query.redirectUri && isAllowedRedirectUri(req.query.redirectUri)) {
-    req.session.oauthRedirectUri = req.query.redirectUri;
-  }
-  passport.authenticate("linkedin", { session: true })(req, res, next);
-});
-
-/**
- * Step 2 — LinkedIn redirects back here.
- */
-router.get("/linkedin/callback",
-  // See the keepSessionInfo comment on the Google callback above — same fix applies here.
-  passport.authenticate("linkedin", { session: true, keepSessionInfo: true, failureRedirect: "/api/auth/oauth/error" }),
-  async (req, res) => {
-    try {
-      const { accessToken, refreshToken, expiresAt } = await AuthService.issueSocialSession(req.user, req);
-
-      const appDeepLink =
-        req.session.oauthRedirectUri ??
-        `${process.env.APP_DEEP_LINK ?? "career-assistant://"}oauth/callback`;
-
-      delete req.session.oauthRedirectUri;
-
-      const separator = appDeepLink.includes("?") ? "&" : "?";
-      const redirectUrl = `${appDeepLink}${separator}accessToken=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}&expiresAt=${expiresAt}`;
-      res.redirect(redirectUrl);
-    } catch (e) {
-      console.error("[OAuth/LinkedIn] Session issue error:", e);
       const fallback = req.session.oauthRedirectUri ?? `${process.env.APP_DEEP_LINK ?? "career-assistant://"}oauth/error`;
       delete req.session.oauthRedirectUri;
       res.redirect(fallback.includes("?") ? `${fallback}&error=auth_failed` : `${fallback}?error=auth_failed`);
