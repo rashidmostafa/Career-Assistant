@@ -5,7 +5,7 @@
  */
 import { ArrowLeft, Clock, Shield, Fingerprint, Key, HelpCircle } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -40,12 +40,18 @@ export default function ReauthScreen() {
   const router  = useRouter();
   const insets  = useSafeAreaInsets();
   const colors  = useColors() as any;
+  const params  = useLocalSearchParams<{ skipCheck?: string }>();
+  // "Set Security Questions" in auth-security.tsx routes here with
+  // ?skipCheck=true — this screen doubles as both the re-auth challenge
+  // (verify existing answers) and the initial setup (choose questions +
+  // answers for the first time). The two need different handlers below.
+  const isSetupMode = params.skipCheck === "true";
   const {
     reauthUrgency, sessionDaysRemaining, biometricAvailable, biometricType,
-    reauthenticate, getSecurityQuestions, signOut,
+    reauthenticate, setSecurityQuestions, getSecurityQuestions, signOut,
   } = useAuth();
 
-  const [method, setMethod] = useState<ReauthMethod | null>(null);
+  const [method, setMethod] = useState<ReauthMethod | null>(isSetupMode ? "security_questions" : null);
   const [password, setPassword] = useState("");
   const [showPw, setShowPw]     = useState(false);
   const [loading, setLoading]   = useState(false);
@@ -73,10 +79,12 @@ export default function ReauthScreen() {
   }, [graceExpiry]);
 
   useEffect(() => {
-    if (method === "security_questions") {
+    // In setup mode there's nothing to fetch yet — we're choosing questions
+    // for the first time, not verifying previously-set ones.
+    if (method === "security_questions" && !isSetupMode) {
       getSecurityQuestions().then(setSecurityQs);
     }
-  }, [method]);
+  }, [method, isSetupMode]);
 
   const formatCountdown = (ms: number) => {
     if (ms <= 0) return "00:00:00";
@@ -141,6 +149,22 @@ export default function ReauthScreen() {
     }
   }, [reauthenticate, router]);
 
+  // Setup mode: choosing questions + answers for the first time — saves them
+  // via the real server endpoint rather than verifying against anything.
+  const handleSaveSecurityQuestions = useCallback(async (questions: Array<{ question: string; answer: string }>) => {
+    setError(null);
+    setLoading(true);
+    try {
+      await setSecurityQuestions(questions);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      router.back();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [setSecurityQuestions, router]);
+
   return (
     <ScrollView
       style={[styles.root, { backgroundColor: colors.background }]}
@@ -148,31 +172,33 @@ export default function ReauthScreen() {
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
     >
-      {reauthUrgency !== "expired" && reauthUrgency !== "grace" && (
+      {(isSetupMode || (reauthUrgency !== "expired" && reauthUrgency !== "grace")) && (
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}
           accessibilityRole="button" accessibilityLabel="Go back">
           <ArrowLeft size={22} color={colors.foreground} />
         </TouchableOpacity>
       )}
 
-      {/* Urgency banner */}
-      <View style={[styles.urgencyBanner, { backgroundColor: cfg.bg, borderColor: cfg.color }]}>
-        <Text style={styles.urgencyEmoji}>{cfg.emoji}</Text>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.urgencyTitle, { color: cfg.color }]}>{cfg.title}</Text>
-          <Text style={[styles.urgencySub, { color: colors.mutedForeground }]}>
-            {reauthUrgency === "expired"
-              ? "Your session has expired. Please re-authenticate to continue."
-              : reauthUrgency === "grace"
-              ? `Grace period ends in ${formatCountdown(countdown)} — please re-authenticate.`
-              : `${sessionDaysRemaining} day${sessionDaysRemaining !== 1 ? "s" : ""} remaining on your 8-week session.`
-            }
-          </Text>
+      {/* Urgency banner — not relevant when just setting up security questions */}
+      {!isSetupMode && (
+        <View style={[styles.urgencyBanner, { backgroundColor: cfg.bg, borderColor: cfg.color }]}>
+          <Text style={styles.urgencyEmoji}>{cfg.emoji}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.urgencyTitle, { color: cfg.color }]}>{cfg.title}</Text>
+            <Text style={[styles.urgencySub, { color: colors.mutedForeground }]}>
+              {reauthUrgency === "expired"
+                ? "Your session has expired. Please re-authenticate to continue."
+                : reauthUrgency === "grace"
+                ? `Grace period ends in ${formatCountdown(countdown)} — please re-authenticate.`
+                : `${sessionDaysRemaining} day${sessionDaysRemaining !== 1 ? "s" : ""} remaining on your 8-week session.`
+              }
+            </Text>
+          </View>
         </View>
-      </View>
+      )}
 
       {/* Countdown (grace period) */}
-      {(reauthUrgency === "grace" || reauthUrgency === "hourly") && countdown > 0 && (
+      {!isSetupMode && (reauthUrgency === "grace" || reauthUrgency === "hourly") && countdown > 0 && (
         <View style={[styles.countdownCard, { backgroundColor: colors.card, borderColor: "#ef4444" }]}>
           <Clock size={18} color="#ef4444" />
           <Text style={[styles.countdownText, { color: "#ef4444" }]}>{formatCountdown(countdown)}</Text>
@@ -181,10 +207,12 @@ export default function ReauthScreen() {
       )}
 
       <Text style={[styles.title, { color: colors.foreground }]}>
-        Verify it's you
+        {isSetupMode ? "Set security questions" : "Verify it's you"}
       </Text>
       <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-        Choose the quickest way to re-authenticate. We're keeping your data safe 🔒
+        {isSetupMode
+          ? "Pick 3 questions and answers — these help you recover your account and provide backup authentication."
+          : "Choose the quickest way to re-authenticate. We're keeping your data safe 🔒"}
       </Text>
 
       {/* Method selection */}
@@ -266,13 +294,22 @@ export default function ReauthScreen() {
       {/* Security questions */}
       {method === "security_questions" && (
         <View style={{ marginTop: 8 }}>
-          {securityQs.length > 0
+          {isSetupMode
+            ? (
+              <SecurityQuestionsForm
+                onSubmit={handleSaveSecurityQuestions}
+                loading={loading}
+                submitLabel="Save Questions"
+                count={3}
+              />
+            )
+            : securityQs.length > 0
             ? (
               <SecurityQuestionsForm
                 onSubmit={handleSecurityQuestions}
                 loading={loading}
                 submitLabel="Verify Answers"
-                count={Math.min(3, securityQs.length)}
+                fixedQuestions={securityQs}
               />
             )
             : (

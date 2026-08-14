@@ -187,9 +187,12 @@ export const AuthApiService = {
   },
 
   // ── Reauth ────────────────────────────────────────────────────────────────────
+  // Field names must match what server/services/authService.js#reauthenticate
+  // destructures ({ method, password, answers, biometricToken }) — it spreads
+  // req.body directly, so a mismatched key here silently sends `undefined`.
   async reauth(payload: {
     method: "password" | "security_questions" | "biometric";
-    credential?: string;
+    password?: string;
     answers?: Array<{ question: string; answer: string }>;
     biometricToken?: string;
   }): Promise<AuthResponse> {

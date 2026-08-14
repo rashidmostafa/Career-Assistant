@@ -42,7 +42,7 @@ export default function SecurityScreen() {
     user, biometricAvailable, biometricType, riskLevel,
     sessionDaysRemaining, reauthUrgency,
     enrollBiometric, disableBiometric, setSecurityQuestions,
-    exportData, requestAccountDeletion, cancelAccountDeletion,
+    exportData, requestAccountDeletion, cancelAccountDeletion, grantConsent,
     signOut, updateUser,
   } = useAuth();
 
@@ -152,6 +152,19 @@ export default function SecurityScreen() {
       else Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     }
   }, [user, enrollBiometric, disableBiometric]);
+
+  // ── GDPR consent ─────────────────────────────────────────────────────────────
+  const handleGrantConsent = useCallback(async () => {
+    setLoading("consent");
+    try {
+      await grantConsent();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setLoading(null);
+    }
+  }, [grantConsent]);
 
   // ── Data export ───────────────────────────────────────────────────────────────
   const handleExport = useCallback(async () => {
@@ -379,6 +392,15 @@ export default function SecurityScreen() {
       <SectionHeader title="Privacy & Data (GDPR)" icon="🔐" colors={colors} />
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Row label="Consent given" value={user.consentGiven ? "Yes ✓" : "No"} valueColor={user.consentGiven ? "#10b981" : "#f59e0b"} colors={colors} />
+        {!user.consentGiven && (
+          <TouchableOpacity
+            style={[styles.actionBtn, { borderColor: "#10b981" + "40", backgroundColor: "#10b98110" }]}
+            onPress={handleGrantConsent} disabled={loading === "consent"}
+            accessibilityRole="button" accessibilityLabel="Grant consent">
+            {loading === "consent" ? <ActivityIndicator color="#10b981" size="small" /> : <Shield size={16} color="#10b981" />}
+            <Text style={[styles.actionBtnText, { color: "#10b981" }]}>Grant Consent</Text>
+          </TouchableOpacity>
+        )}
         {user.deletionScheduledAt && (
           <Row
             label="Deletion scheduled"

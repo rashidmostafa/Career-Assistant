@@ -73,6 +73,7 @@ export default function AuthScreen() {
     signIn, signUp, confirmEmailVerified, resendVerification,
     pendingVerificationEmail, pendingUserId, biometricAvailable,
     biometricType, loginWithBiometric, setSecurityQuestions,
+    loadUserFromServer,
   } = useAuth();
 
   // Biometric hook — drives real enrol/login/auto-prompt
@@ -127,8 +128,11 @@ export default function AuthScreen() {
   // ── Biometric auto-prompt on login screen mount ───────────────────────────────
   React.useEffect(() => {
     if (mode !== "login") return;
-    biometric.autoPromptOnMount(async (result) => {
-      // Save tokens + navigate — result.user is available if needed
+    biometric.autoPromptOnMount(async () => {
+      // biometric.login() only saves tokens — AuthContext's `user` is still
+      // null until we actually load the profile, otherwise AuthGate sees no
+      // user and immediately routes back here even though tokens are valid.
+      await loadUserFromServer();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       router.replace("/(tabs)");
     });
@@ -143,11 +147,14 @@ export default function AuthScreen() {
       // Try the hook-based biometric login first (full server round-trip)
       const result = await biometric.login();
       if (result) {
+        // Same fix as autoPromptOnMount above — populate AuthContext.user
+        // before navigating, or AuthGate bounces straight back to /auth.
+        await loadUserFromServer();
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         router.replace("/(tabs)");
         return;
       }
-      // Fall back to legacy AuthContext biometric (local simulation)
+      // Fall back to legacy AuthContext biometric (already updates `user`)
       const ok = await loginWithBiometric();
       if (ok) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -160,7 +167,7 @@ export default function AuthScreen() {
     } finally {
       setLoading(false);
     }
-  }, [biometric, loginWithBiometric, router]);
+  }, [biometric, loginWithBiometric, loadUserFromServer, router]);
 
   // ── Register ─────────────────────────────────────────────────────────────────
   const handleRegister = useCallback(async () => {
@@ -172,7 +179,7 @@ export default function AuthScreen() {
     if (!consentGiven)           { setError("Please accept the privacy policy to continue."); return; }
     setLoading(true);
     try {
-      await signUp({ name: name.trim(), email: email.trim().toLowerCase(), password, phone: phone.trim() || undefined });
+      await signUp({ name: name.trim(), email: email.trim().toLowerCase(), password, phone: phone.trim() || undefined, consentGiven });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       setMode("verify-otp");
       // Start 10-minute countdown timer

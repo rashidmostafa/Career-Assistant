@@ -79,7 +79,7 @@ export interface AuthContextType {
   biometricType: "FaceID" | "Fingerprint" | "None";
   // ── Legacy API (backward compat) ────────────────────────────────────────────
   signIn: (email: string, password: string) => Promise<{ require2FA?: boolean; userId?: string; method?: string }>;
-  signUp: (data: { name: string; email: string; password: string; phone?: string }) => Promise<void>;
+  signUp: (data: { name: string; email: string; password: string; phone?: string; consentGiven?: boolean }) => Promise<void>;
   signOut: () => Promise<void>;
   updateUser: (data: Partial<User>) => Promise<void>;
   completeOnboarding: (background: string, experienceLevel: string, targetRole: string) => Promise<void>;
@@ -268,13 +268,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // real OTP; there is no local fallback that would let a fake address through.
   // ─────────────────────────────────────────────────────────────────────────────
   const signUp = useCallback(async (data: {
-    name: string; email: string; password: string; phone?: string;
+    name: string; email: string; password: string; phone?: string; consentGiven?: boolean;
   }) => {
     const result = await AuthApiService.register({
       name: data.name,
       email: data.email,
       password: data.password,
       phone: data.phone,
+      consentGiven: data.consentGiven,
     });
 
     pendingPasswordRef.current = data.password;
@@ -402,7 +403,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!ok) return false;
         result = await AuthApiService.reauth({ method: "biometric", biometricToken: "device-confirmed" });
       } else if (method === "password" && typeof credential === "string") {
-        result = await AuthApiService.reauth({ method: "password", credential });
+        result = await AuthApiService.reauth({ method: "password", password: credential });
       } else if (method === "security_questions" && Array.isArray(credential)) {
         result = await AuthApiService.reauth({ method: "security_questions", answers: credential });
       } else {

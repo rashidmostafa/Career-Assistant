@@ -27,12 +27,22 @@ interface Props {
   submitLabel?: string;
   loading?: boolean;
   count?: number;
+  /**
+   * When set, renders in "verify" mode: the questions shown are exactly
+   * these (read-only, no picker) and the user only fills in answers.
+   * Without this, the form is in "setup" mode — pick any questions from
+   * the preset list and answer them for the first time.
+   */
+  fixedQuestions?: string[];
 }
 
-export function SecurityQuestionsForm({ onSubmit, submitLabel = "Save Questions", loading = false, count = 3 }: Props) {
+export function SecurityQuestionsForm({ onSubmit, submitLabel = "Save Questions", loading = false, count = 3, fixedQuestions }: Props) {
   const colors = useColors();
+  const isVerifyMode = !!fixedQuestions?.length;
   const [pairs, setPairs] = useState<QAPair[]>(
-    Array.from({ length: count }, () => ({ question: PRESET_QUESTIONS[0], answer: "" }))
+    isVerifyMode
+      ? fixedQuestions!.map((q) => ({ question: q, answer: "" }))
+      : Array.from({ length: count }, () => ({ question: PRESET_QUESTIONS[0], answer: "" }))
   );
   const [openPicker, setOpenPicker] = useState<number | null>(null);
 
@@ -57,33 +67,42 @@ export function SecurityQuestionsForm({ onSubmit, submitLabel = "Save Questions"
         <View key={idx} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.label, { color: colors.mutedForeground }]}>Question {idx + 1}</Text>
 
-          {/* Question picker */}
-          <TouchableOpacity
-            style={[styles.picker, { borderColor: colors.border }]}
-            onPress={() => setOpenPicker(openPicker === idx ? null : idx)}
-            accessibilityRole="combobox"
-            accessibilityLabel={`Select question ${idx + 1}`}
-            accessibilityState={{ expanded: openPicker === idx }}
-          >
-            <Text style={[styles.pickerText, { color: colors.foreground }]} numberOfLines={2}>{pair.question}</Text>
-            <ChevronDown size={18} color={colors.mutedForeground} />
-          </TouchableOpacity>
+          {isVerifyMode ? (
+            /* Verify mode — show the actual saved question, no picker */
+            <View style={[styles.picker, { borderColor: colors.border }]}>
+              <Text style={[styles.pickerText, { color: colors.foreground }]} numberOfLines={2}>{pair.question}</Text>
+            </View>
+          ) : (
+            <>
+              {/* Question picker (setup mode only) */}
+              <TouchableOpacity
+                style={[styles.picker, { borderColor: colors.border }]}
+                onPress={() => setOpenPicker(openPicker === idx ? null : idx)}
+                accessibilityRole="combobox"
+                accessibilityLabel={`Select question ${idx + 1}`}
+                accessibilityState={{ expanded: openPicker === idx }}
+              >
+                <Text style={[styles.pickerText, { color: colors.foreground }]} numberOfLines={2}>{pair.question}</Text>
+                <ChevronDown size={18} color={colors.mutedForeground} />
+              </TouchableOpacity>
 
-          {openPicker === idx && (
-            <ScrollView style={[styles.dropdown, { backgroundColor: colors.card, borderColor: colors.border }]} nestedScrollEnabled>
-              {PRESET_QUESTIONS.map((q) => (
-                <TouchableOpacity
-                  key={q}
-                  style={[styles.option, { borderBottomColor: colors.border }]}
-                  onPress={() => setQuestion(idx, q)}
-                  accessibilityRole="menuitem"
-                >
-                  <Text style={[styles.optionText, { color: q === pair.question ? colors.primary : colors.foreground }]}>
-                    {q}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+              {openPicker === idx && (
+                <ScrollView style={[styles.dropdown, { backgroundColor: colors.card, borderColor: colors.border }]} nestedScrollEnabled>
+                  {PRESET_QUESTIONS.map((q) => (
+                    <TouchableOpacity
+                      key={q}
+                      style={[styles.option, { borderBottomColor: colors.border }]}
+                      onPress={() => setQuestion(idx, q)}
+                      accessibilityRole="menuitem"
+                    >
+                      <Text style={[styles.optionText, { color: q === pair.question ? colors.primary : colors.foreground }]}>
+                        {q}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+            </>
           )}
 
           {/* Answer */}
