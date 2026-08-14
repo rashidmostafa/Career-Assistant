@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { extractSkillsFromText } from "@/utils/skillsExtract";
 import { useAuth } from "./AuthContext";
 
 export interface ATSBreakdown {
@@ -27,6 +28,8 @@ export interface CVProfile {
   atsScore: number;
   breakdown: ATSBreakdown;
   suggestions: CVSuggestion[];
+  /** Canonical skill names detected in the CV — drives job match scoring. */
+  skills: string[];
   format: string;
   updatedAt: string;
 }
@@ -49,6 +52,20 @@ const WEIGHTS: Record<keyof ATSBreakdown, number> = {
   grammar: 0.15,
 };
 
+const BREAKDOWN_KEYS: (keyof ATSBreakdown)[] = ["keyword", "formatting", "achievements", "skills", "experience", "grammar"];
+
+/** Guard against a corrupt/partial CVProfile (old app version, interrupted write) crashing the result view. */
+function isValidCVProfile(v: unknown): v is CVProfile {
+  if (!v || typeof v !== "object") return false;
+  const p = v as Record<string, unknown>;
+  if (typeof p.rawText !== "string" || typeof p.fullOptimizedCV !== "string") return false;
+  if (typeof p.atsScore !== "number") return false;
+  if (!p.breakdown || typeof p.breakdown !== "object") return false;
+  if (!BREAKDOWN_KEYS.every((k) => typeof (p.breakdown as Record<string, unknown>)[k] === "number")) return false;
+  if (!Array.isArray(p.suggestions)) return false;
+  return true;
+}
+
 function computeOverallScore(breakdown: ATSBreakdown): number {
   const weighted =
     breakdown.keyword * WEIGHTS.keyword +
@@ -67,9 +84,26 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
 
   const load = useCallback(async () => {
     if (!user) { setCvProfile(null); return; }
-    const data = await AsyncStorage.getItem(`cv_${user.id}`);
-    if (data) setCvProfile(JSON.parse(data));
-    else setCvProfile(null);
+    try {
+      const data = await AsyncStorage.getItem(`cv_${user.id}`);
+      const parsed = data ? JSON.parse(data) : null;
+      if (!isValidCVProfile(parsed)) {
+        // Corrupt/partial data from an old version or interrupted write —
+        // drop it rather than let a malformed shape crash the result view.
+        if (data) await AsyncStorage.removeItem(`cv_${user.id}`);
+        setCvProfile(null);
+        return;
+      }
+      // Profiles saved before skills extraction existed have no `skills`;
+      // derive them now so job matching works without a re-upload.
+      if (!Array.isArray(parsed.skills) || parsed.skills.length === 0) {
+        parsed.skills = extractSkillsFromText(`${parsed.rawText}\n${parsed.fullOptimizedCV}`);
+        await AsyncStorage.setItem(`cv_${user.id}`, JSON.stringify(parsed));
+      }
+      setCvProfile(parsed);
+    } catch {
+      setCvProfile(null);
+    }
   }, [user]);
 
   useEffect(() => { load(); }, [load]);
@@ -103,10 +137,10 @@ Then provide exactly 5 Turnitin-style suggestions. Each suggestion must referenc
 
 Finally, produce the FULL rewritten, ATS-optimised CV in ${format} format using the candidate's ACTUAL information from the CV above (do not invent an unrelated person). Every standard section that has real content in the source CV (Summary, Experience, Education, Skills, Projects, Certifications) must appear, fully written out, with all 5 suggestions already applied/integrated. This must be the complete CV, not a snippet or outline.
 
-Format guidance:
-- Harvard: Academic style, education first, achievement-focused bullet points
-- MIT: Technical style, projects and skills first, metrics-driven
-- Corporate: Experience first, summary at top, metric-driven achievements
+Format guidance (these follow each institution's actual published resume guide — match the section order and content exactly, only omitting a section if the source CV has nothing real to put in it):
+- Harvard (per Harvard OCS/Mignone Center resume guide): Header (name, phone, email, LinkedIn) → brief Summary/Objective (optional, 1-2 lines) → Education (reverse chronological: institution, location, degree, expected/actual graduation date, GPA if strong, relevant coursework/honors) → Experience (reverse chronological, bullet points starting with strong action verbs, quantified accomplishments) → Leadership/Activities (optional — move above Experience only if more relevant to the target role) → Skills & Interests (technical skills, languages with fluency level, lab techniques if applicable, personal interests).
+- MIT (per MIT CAPD career toolkit): Header → Education (institution, degree, expected date, relevant coursework, GPA) → Technical Skills (a dedicated categorized block — e.g. Languages / Frameworks & Tools / Lab Techniques — placed right after Education) → Projects (course and personal projects are a key differentiator for MIT students — name each project, note the GitHub/portfolio link if the source mentions one) → Experience/Research Experience → Leadership/Activities (optional). Every bullet must follow a PAR structure (Action verb + Project/task + measurable Result), never first person, never full sentences.
+- Corporate (standard ATS-optimised professional format used across industry): Header (name, phone, email, LinkedIn, location) → Professional Summary (2-4 lines: years of experience, key skills, career focus) → Core Competencies/Skills (keyword-rich, tailored to the target role for ATS scanning) → Professional Experience (reverse chronological, quantified achievements, action verbs) → Education → Certifications (only if the source CV mentions any). Single-column, standard section headings, no tables or graphics — this is what ATS parsers expect.
 
 Return ONLY a valid JSON object with exactly these fields, no markdown, no code blocks:
 {
@@ -172,6 +206,9 @@ Return ONLY a valid JSON object with exactly these fields, no markdown, no code 
         atsScore,
         breakdown,
         suggestions,
+        // Scan the optimised CV too — the rewrite often surfaces skills that
+        // were implied rather than named in the original text.
+        skills: extractSkillsFromText(`${rawText}\n${fullOptimizedCV}`),
         format,
         updatedAt: new Date().toISOString(),
       };
@@ -233,38 +270,109 @@ function estimateBreakdown(rawText: string): ATSBreakdown {
   };
 }
 
-function sectionize(rawText: string): { experience: string; education: string; skills: string; summary: string } {
+/** Section header keywords, checked in order — first match wins per section. */
+const SECTION_HEADERS: Record<string, string[]> = {
+  summary: ["professional summary", "summary", "objective", "profile"],
+  education: ["education", "academic background"],
+  experience: ["professional experience", "work experience", "experience", "work history", "employment"],
+  projects: ["selected projects", "personal projects", "projects"],
+  skills: ["technical skills", "core competencies", "skills", "technologies", "proficient"],
+  activities: ["leadership & activities", "leadership and activities", "activities", "leadership"],
+  certifications: ["certifications", "certificates", "licenses"],
+};
+
+/**
+ * Split raw CV text into the sections a real resume guide expects, bounding
+ * each one by the START OF THE NEXT detected header rather than a fixed
+ * character count — a fixed slice regularly cut a section mid-sentence or
+ * bled into whatever came next.
+ */
+function sectionize(rawText: string): {
+  summary: string; education: string; experience: string; projects: string;
+  skills: string; activities: string; certifications: string;
+} {
   const lower = rawText.toLowerCase();
-  const findSection = (keys: string[]) => {
-    for (const key of keys) {
-      const idx = lower.indexOf(key);
-      if (idx !== -1) return rawText.slice(idx, idx + 400).trim();
+  const hits: { key: string; idx: number; len: number }[] = [];
+  for (const [key, keywords] of Object.entries(SECTION_HEADERS)) {
+    for (const kw of keywords) {
+      const idx = lower.indexOf(kw);
+      if (idx !== -1) { hits.push({ key, idx, len: kw.length }); break; }
     }
-    return "";
+  }
+  hits.sort((a, b) => a.idx - b.idx);
+
+  const sectionText = (key: string): string => {
+    const hit = hits.find((h) => h.key === key);
+    if (!hit) return "";
+    const start = hit.idx + hit.len;
+    const next = hits.find((h) => h.idx > hit.idx);
+    const end = next ? next.idx : Math.min(rawText.length, start + 800);
+    return rawText.slice(start, end).replace(/^[:\s]+/, "").trim();
   };
+
   return {
-    summary: rawText.slice(0, 300).trim(),
-    experience: findSection(["experience", "work history", "employment"]),
-    education: findSection(["education", "university", "degree"]),
-    skills: findSection(["skills", "technologies", "proficient"]),
+    summary: sectionText("summary") || rawText.slice(0, 300).trim(),
+    education: sectionText("education"),
+    experience: sectionText("experience"),
+    projects: sectionText("projects"),
+    skills: sectionText("skills"),
+    activities: sectionText("activities"),
+    certifications: sectionText("certifications"),
   };
 }
 
+/** Pull real contact details out of the CV text instead of inventing placeholders. */
+function extractContactInfo(rawText: string): { email: string; phone: string; linkedin: string } {
+  const email = rawText.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)?.[0] ?? "";
+  const phone = rawText.match(/(\+?\d[\d\s().-]{7,}\d)/)?.[0]?.trim() ?? "";
+  const linkedin = rawText.match(/linkedin\.com\/in\/[\w-]+/i)?.[0] ?? "";
+  return { email, phone, linkedin };
+}
+
+/**
+ * Builds a resume that actually follows each institution's published guide
+ * (verified against the real Harvard OCS, MIT CAPD, and standard corporate/
+ * ATS resume guides — section order and content match what each expects),
+ * using the CV's own detected sections and real contact info rather than
+ * placeholders. Used when no OpenAI key is configured or the API call fails.
+ */
 function generateFallbackCV(rawText: string, format: string, role: string, name: string): string {
   const n = (name || "Your Name").toUpperCase();
-  const { experience, education, skills, summary } = sectionize(rawText);
-  const expBlock = experience || "[No experience details detected in the uploaded PDF — add your most recent roles with quantified achievements.]";
-  const eduBlock = education || "[No education details detected in the uploaded PDF — add your degree, institution, and graduation date.]";
-  const skillsBlock = skills || "[No skills detected in the uploaded PDF — list your key technical and soft skills relevant to this role.]";
+  const { summary, education, experience, projects, skills, activities, certifications } = sectionize(rawText);
+  const { email, phone, linkedin } = extractContactInfo(rawText);
+  const contactLine = [email, phone, linkedin].filter(Boolean).join(" | ") || "Add your email, phone, and LinkedIn";
+
+  const missing = (label: string) => `[No ${label} detected in the uploaded PDF — add this section with real details.]`;
+  const eduBlock = education || missing("education details");
+  const expBlock = experience || missing("experience details");
+  const skillsBlock = skills || missing("skills");
+  const projectsBlock = projects || missing("projects");
   const summaryBlock = summary || `Results-driven ${role} with a track record of delivering measurable impact.`;
 
+  const footer = "\n\n---\nGenerated from your uploaded CV. Connect an OpenAI API key for a fully AI-rewritten version with all suggestions applied.";
+
   if (format === "MIT") {
-    return `${n}\nyourname@email.com | github.com/${name.toLowerCase().replace(/\s/g, "")}\n\nTECHNICAL SKILLS\n${skillsBlock}\n\nPROJECTS\n[Project highlights extracted/derived from your CV — add measurable outcomes]\n\nWORK EXPERIENCE\n${expBlock}\n\nEDUCATION\n${eduBlock}\n\n---\nGenerated from your uploaded CV. Connect an OpenAI API key for a fully AI-rewritten version with all suggestions applied.`;
+    // MIT CAPD order: Header → Education → Technical Skills → Projects → Experience → Activities.
+    // Technical Skills sits right after Education per MIT's guide, and Projects
+    // gets its own section — MIT students' course/personal projects are called
+    // out as a key differentiator.
+    let out = `${n}\n${contactLine}\n\nEDUCATION\n${eduBlock}\n\nTECHNICAL SKILLS\n${skillsBlock}\n\nPROJECTS\n${projectsBlock}\n\nEXPERIENCE\n${expBlock}`;
+    if (activities) out += `\n\nLEADERSHIP & ACTIVITIES\n${activities}`;
+    return out + footer;
   }
   if (format === "Corporate") {
-    return `${n}\nyourname@email.com | Your Location\n\nPROFESSIONAL SUMMARY\n${summaryBlock}\n\nCORE COMPETENCIES\n${skillsBlock}\n\nPROFESSIONAL EXPERIENCE\n${expBlock}\n\nEDUCATION\n${eduBlock}\n\n---\nGenerated from your uploaded CV. Connect an OpenAI API key for a fully AI-rewritten version with all suggestions applied.`;
+    // Standard ATS/corporate order: Header (with role headline) → Summary →
+    // Core Competencies → Professional Experience → Education → Certifications.
+    let out = `${n}\n${role}\n${contactLine}\n\nPROFESSIONAL SUMMARY\n${summaryBlock}\n\nCORE COMPETENCIES\n${skillsBlock}\n\nPROFESSIONAL EXPERIENCE\n${expBlock}\n\nEDUCATION\n${eduBlock}`;
+    if (certifications) out += `\n\nCERTIFICATIONS\n${certifications}`;
+    return out + footer;
   }
-  return `${n}\n${role}\nyourname@email.com | linkedin.com/in/${name.toLowerCase().replace(/\s/g, "")}\n\nEDUCATION\n${eduBlock}\n\nPROFESSIONAL EXPERIENCE\n${expBlock}\n\nSKILLS\n${skillsBlock}\n\n---\nGenerated from your uploaded CV. Connect an OpenAI API key for a fully AI-rewritten version with all suggestions applied.`;
+  // Harvard OCS order: Header → brief Summary → Education → Experience →
+  // Activities (optional) → Skills & Interests.
+  let out = `${n}\n${contactLine}\n\n${summaryBlock}\n\nEDUCATION\n${eduBlock}\n\nEXPERIENCE\n${expBlock}`;
+  if (activities) out += `\n\nLEADERSHIP & ACTIVITIES\n${activities}`;
+  out += `\n\nSKILLS & INTERESTS\n${skillsBlock}`;
+  return out + footer;
 }
 
 function generateFallbackSuggestions(rawText: string, role: string): CVSuggestion[] {

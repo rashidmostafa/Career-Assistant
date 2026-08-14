@@ -19,7 +19,7 @@ import * as Clipboard from "expo-clipboard";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system";
+import { File } from "expo-file-system";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useState } from "react";
 import {
@@ -38,7 +38,8 @@ import { ScoreRing } from "@/components/ScoreRing";
 import { useCV, ATSBreakdown } from "@/context/CVContext";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { extractPdfTextFromBase64 } from "@/utils/pdfExtract";
+import { extractPdfTextFromBase64, diagnosePdf } from "@/utils/pdfExtract";
+import { toByteArray } from "base64-js";
 
 type CVFormat = "Harvard" | "MIT" | "Corporate";
 const CV_FORMATS: { id: CVFormat; label: string; icon: React.ElementType; description: string; color: string }[] = [
@@ -99,9 +100,23 @@ export default function CVScreen() {
 
       let extractedText = "";
       try {
-        const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: "base64" as const });
+        const base64 = await new File(asset.uri).base64();
         extractedText = extractPdfTextFromBase64(base64);
-      } catch {
+        if (__DEV__) {
+          try {
+            const diagnostics = diagnosePdf(toByteArray(base64));
+            // eslint-disable-next-line no-console
+            console.log("[pdfExtract diagnostics]", JSON.stringify(diagnostics, null, 2));
+          } catch (diagErr) {
+            // eslint-disable-next-line no-console
+            console.log("[pdfExtract diagnostics] failed to compute:", diagErr);
+          }
+        }
+      } catch (extractErr) {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.log("[pdfExtract] extraction threw:", extractErr);
+        }
         /* fall through to error below */
       }
 
@@ -275,7 +290,7 @@ export default function CVScreen() {
             <Text style={[styles.sectionTitle, { color: colors.foreground }]}>ATS Score Breakdown</Text>
             <View style={[styles.breakdownCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               {BREAKDOWN_ROWS.map(({ key, label, weight }) => {
-                const value = cvProfile.breakdown[key];
+                const value = cvProfile.breakdown?.[key] ?? 0;
                 const barColor = value >= 75 ? colors.success : value >= 50 ? colors.warning : colors.destructive;
                 return (
                   <View key={key} style={styles.breakdownRow}>
@@ -293,7 +308,7 @@ export default function CVScreen() {
             </View>
 
             <Text style={[styles.sectionTitle, { color: colors.foreground }]}>AI Suggestions (tap to expand)</Text>
-            {cvProfile.suggestions.map((s, i) => {
+            {(cvProfile.suggestions ?? []).map((s, i) => {
               const expanded = expandedSuggestion === i;
               return (
                 <TouchableOpacity

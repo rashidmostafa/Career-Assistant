@@ -22,13 +22,24 @@ import { toByteArray } from "base64-js";
  * like plausible text.
  */
 
-const textDecoder = () => {
-  if (typeof TextDecoder !== "undefined") return new TextDecoder("latin1");
-  return null;
-};
+// React Native's built-in TextDecoder (Hermes) only implements the "utf-8"
+// label and throws a RangeError for anything else, including the
+// WHATWG-legal "latin1"/"windows-1252" alias we need here — so probe for
+// support once (constructing it is what throws, not just decode()) and
+// cache the result instead of trying and failing on every single call.
+let latin1Decoder: TextDecoder | null | undefined;
+function getLatin1Decoder(): TextDecoder | null {
+  if (latin1Decoder !== undefined) return latin1Decoder;
+  try {
+    latin1Decoder = typeof TextDecoder !== "undefined" ? new TextDecoder("latin1") : null;
+  } catch {
+    latin1Decoder = null;
+  }
+  return latin1Decoder;
+}
 
 function bytesToLatin1String(bytes: Uint8Array): string {
-  const decoder = textDecoder();
+  const decoder = getLatin1Decoder();
   if (decoder) {
     try {
       return decoder.decode(bytes);
@@ -48,8 +59,34 @@ function base64ToBytes(base64: string): Uint8Array {
   return toByteArray(base64);
 }
 
-/** Decode a PDF literal string, e.g. (Hello \(World\)) -> Hello (World) */
-function decodeLiteralString(raw: string): string {
+/**
+ * Decode a PDF literal string, e.g. (Hello \(World\)) -> Hello (World).
+ * When a ToUnicode CMap is available, also try mapping each raw byte
+ * through it (subsetted simple fonts use custom 1-byte codes that only
+ * resolve to real characters via their font's CMap) and prefer that
+ * decode when it resolves most of the bytes.
+ */
+function decodeLiteralString(raw: string, cmap: UnicodeMap | null = null): string {
+  const plain = decodeLiteralStringRaw(raw);
+  if (cmap && cmap.size > 0) {
+    let out = "";
+    let hits = 0;
+    for (let i = 0; i < plain.length; i++) {
+      const code = plain.charCodeAt(i).toString(16).padStart(4, "0").toUpperCase();
+      const mapped = cmap.get(code);
+      if (mapped !== undefined) {
+        out += mapped;
+        hits++;
+      } else {
+        out += plain[i];
+      }
+    }
+    if (plain.length > 0 && hits / plain.length >= 0.5) return out;
+  }
+  return plain;
+}
+
+function decodeLiteralStringRaw(raw: string): string {
   let out = "";
   for (let i = 0; i < raw.length; i++) {
     const c = raw[i];
@@ -114,14 +151,24 @@ function decodeHexStringLatin1(raw: string): string {
   return out;
 }
 
-/** Decode a PDF hex string as 2-byte CID/glyph codes via a ToUnicode map. */
-function decodeHexStringViaCMap(raw: string, cmap: UnicodeMap): { text: string; hits: number; total: number } {
+/**
+ * Decode a PDF hex string as fixed-width glyph codes via a ToUnicode map.
+ * `bytesPerCode` is 2 for composite/CID (Type0, e.g. Identity-H) fonts, or 1
+ * for simple fonts (Type1/TrueType) — both kinds may ship a ToUnicode CMap,
+ * and the source-code width is only knowable by matching against the map.
+ */
+function decodeHexStringViaCMap(
+  raw: string,
+  cmap: UnicodeMap,
+  bytesPerCode: 1 | 2
+): { text: string; hits: number; total: number } {
   const clean = raw.replace(/[^0-9a-fA-F]/g, "");
+  const step = bytesPerCode * 2;
   let out = "";
   let hits = 0;
   let total = 0;
-  for (let i = 0; i + 4 <= clean.length; i += 4) {
-    const code = clean.slice(i, i + 4).toUpperCase();
+  for (let i = 0; i + step <= clean.length; i += step) {
+    const code = clean.slice(i, i + step).padStart(4, "0").toUpperCase();
     total++;
     const mapped = cmap.get(code);
     if (mapped !== undefined) {
@@ -133,53 +180,95 @@ function decodeHexStringViaCMap(raw: string, cmap: UnicodeMap): { text: string; 
 }
 
 /**
- * Pick the best decode for a hex string: prefer the CMap (2-byte CID) decode
- * when it resolves most of the codes, otherwise fall back to a plain
- * 1-byte latin1 decode (used by simple, non-composite fonts).
+ * Pick the best decode for a hex string. A ToUnicode CMap may key its glyph
+ * codes as 1 byte (simple Type1/TrueType fonts) or 2 bytes (composite/CID
+ * Type0 fonts, e.g. Identity-H) — try both widths and keep whichever
+ * resolves the most codes, otherwise fall back to a plain 1-byte latin1
+ * decode (used by simple fonts with a standard/WinAnsi encoding and no
+ * ToUnicode map at all).
  */
 function decodeHexString(raw: string, cmap: UnicodeMap | null): string {
   if (cmap && cmap.size > 0) {
-    const viaCMap = decodeHexStringViaCMap(raw, cmap);
-    if (viaCMap.total > 0 && viaCMap.hits / viaCMap.total >= 0.5) {
-      return viaCMap.text;
+    const via2Byte = decodeHexStringViaCMap(raw, cmap, 2);
+    const via1Byte = decodeHexStringViaCMap(raw, cmap, 1);
+    const ratio2 = via2Byte.total > 0 ? via2Byte.hits / via2Byte.total : 0;
+    const ratio1 = via1Byte.total > 0 ? via1Byte.hits / via1Byte.total : 0;
+    if (ratio1 >= 0.5 || ratio2 >= 0.5) {
+      return ratio1 >= ratio2 ? via1Byte.text : via2Byte.text;
     }
   }
   return decodeHexStringLatin1(raw);
 }
 
-/** Extract readable text from a single decompressed PDF content stream. */
-function extractTextFromContentStream(stream: string, cmap: UnicodeMap | null): string {
+/**
+ * Extract readable text from a single decompressed PDF content stream.
+ *
+ * A page's content stream can select a different font mid-stream via the
+ * `/Name size Tf` operator, and each font may carry its own independent
+ * ToUnicode CMap (subsetted fonts commonly restart glyph numbering from 1,
+ * so a header font's code 0x01 and a body font's code 0x01 mean different
+ * characters). We scan the stream as one ordered token pass — rather than
+ * three independent regex passes over TJ/Tj/hex operators, which would
+ * lose the interleaved Tf switches — and swap the active CMap every time a
+ * Tf operator is seen, resolved via `fontCMaps` (resource name -> that
+ * font's CMap). `fallbackCmap` (the merged CMap of every font in the
+ * document) is used whenever the active font can't be resolved.
+ */
+function extractTextFromContentStream(
+  stream: string,
+  fallbackCmap: UnicodeMap | null,
+  fontCMaps: Map<string, UnicodeMap>
+): string {
   const pieces: string[] = [];
-  // Handle TJ arrays: [(Hello) -250 (World)] TJ  or  [<0041> -250 <0042>] TJ
-  const tjArrayRegex = /\[((?:[^\[\]\\]|\\.)*)\]\s*TJ/g;
-  // Handle simple Tj / ' / " strings: (Hello World) Tj
-  const tjStringRegex = /\((?:[^()\\]|\\.)*\)\s*(?:Tj|'|")/g;
-  const hexStringRegex = /<([0-9a-fA-F\s]+)>\s*(?:Tj|'|")/g;
+  let currentCmap: UnicodeMap | null = fallbackCmap;
+
+  // Alternatives, tried in order at each position: font selection, a TJ
+  // array, a literal-string Tj/'/" , or a hex-string Tj/'/".
+  const tokenRegex =
+    /\/([A-Za-z0-9#+._-]+)\s+[-\d.]+\s+Tf|\[((?:[^\[\]\\]|\\.)*)\]\s*TJ|\(((?:[^()\\]|\\.)*)\)\s*(?:Tj|'|")|<([0-9a-fA-F\s]+)>\s*(?:Tj|'|")/g;
 
   let match: RegExpExecArray | null;
-
-  while ((match = tjArrayRegex.exec(stream)) !== null) {
-    const inner = match[1];
-    const partRegex = /\(((?:[^()\\]|\\.)*)\)|<([0-9a-fA-F\s]+)>/g;
-    let partMatch: RegExpExecArray | null;
-    let line = "";
-    while ((partMatch = partRegex.exec(inner)) !== null) {
-      if (partMatch[1] !== undefined) {
-        line += decodeLiteralString(partMatch[1]);
-      } else if (partMatch[2] !== undefined) {
-        line += decodeHexString(partMatch[2], cmap);
-      }
+  while ((match = tokenRegex.exec(stream)) !== null) {
+    if (match[1] !== undefined) {
+      const fontCmap = fontCMaps.get(match[1]);
+      currentCmap = fontCmap && fontCmap.size > 0 ? fontCmap : fallbackCmap;
+      continue;
     }
-    if (line) pieces.push(line);
-  }
 
-  while ((match = tjStringRegex.exec(stream)) !== null) {
-    const literal = match[0].match(/\(((?:[^()\\]|\\.)*)\)/);
-    if (literal) pieces.push(decodeLiteralString(literal[1]));
-  }
+    if (match[2] !== undefined) {
+      const inner = match[2];
+      // TJ arrays interleave shown strings with bare numbers that nudge the
+      // pen (kerning): [(Hello)-278(World)]TJ. Many PDF writers use that gap
+      // as the ONLY thing separating two words — there's no literal space
+      // character anywhere in the string — so a sufficiently large negative
+      // adjustment (letter-pair kerning is rarely beyond -100 in practice;
+      // an actual word-space glyph is typically -150 to -400) must be
+      // rendered back as a space or words silently run together.
+      const partRegex = /\(((?:[^()\\]|\\.)*)\)|<([0-9a-fA-F\s]+)>|(-?\d+(?:\.\d+)?)/g;
+      let partMatch: RegExpExecArray | null;
+      let line = "";
+      while ((partMatch = partRegex.exec(inner)) !== null) {
+        if (partMatch[1] !== undefined) {
+          line += decodeLiteralString(partMatch[1], currentCmap);
+        } else if (partMatch[2] !== undefined) {
+          line += decodeHexString(partMatch[2], currentCmap);
+        } else if (partMatch[3] !== undefined) {
+          const gap = parseFloat(partMatch[3]);
+          if (gap <= -150 && line.length > 0 && !line.endsWith(" ")) line += " ";
+        }
+      }
+      if (line) pieces.push(line);
+      continue;
+    }
 
-  while ((match = hexStringRegex.exec(stream)) !== null) {
-    pieces.push(decodeHexString(match[1], cmap));
+    if (match[3] !== undefined) {
+      pieces.push(decodeLiteralString(match[3], currentCmap));
+      continue;
+    }
+
+    if (match[4] !== undefined) {
+      pieces.push(decodeHexString(match[4], currentCmap));
+    }
   }
 
   // Line/word breaks: PDFs usually mark new lines with Td/TD/T* operators.
@@ -187,6 +276,7 @@ function extractTextFromContentStream(stream: string, cmap: UnicodeMap | null): 
 }
 
 interface StreamObject {
+  num: number;
   dict: string;
   data: Uint8Array;
 }
@@ -226,10 +316,99 @@ function findStreamObjects(bytes: Uint8Array): StreamObject[] {
     const absDataStart = objStartOffset + dataStart;
     const absDataEnd = objStartOffset + endIdx;
     const data = bytes.subarray(absDataStart, absDataEnd);
-    streams.push({ dict, data });
+    streams.push({ num: parseInt(match[1], 10), dict, data });
   }
 
   return streams;
+}
+
+/**
+ * Walk raw PDF bytes and pull out every indirect object's dictionary body
+ * (non-stream objects too — Font dicts, Font-resource maps, Resources
+ * dicts), keyed by object number. Used to resolve which ToUnicode CMap
+ * belongs to which `/Name ... Tf` resource name.
+ */
+function findAllObjectDicts(bytes: Uint8Array): Map<number, string> {
+  const latin1 = bytesToLatin1String(bytes);
+  const objects = new Map<number, string>();
+  const objRegex = /(\d+)\s+(\d+)\s+obj([\s\S]*?)(?:endobj|(?=\d+\s+\d+\s+obj)|$)/g;
+
+  let match: RegExpExecArray | null;
+  while ((match = objRegex.exec(latin1)) !== null) {
+    let body = match[3];
+    const streamIdx = body.indexOf("stream");
+    if (streamIdx !== -1) {
+      const before = body[streamIdx - 1];
+      if (before === undefined || !/[A-Za-z]/.test(before)) {
+        body = body.slice(0, streamIdx);
+      }
+    }
+    objects.set(parseInt(match[1], 10), body);
+  }
+  return objects;
+}
+
+/**
+ * Resolve a `/Name ... Tf` resource name (e.g. "F1") to the ToUnicode CMap
+ * of the actual font it refers to. Font resource dicts (e.g.
+ * `20 0 obj <</F1 19 0 R/F2 22 0 R>> endobj`) are found heuristically: any
+ * object whose body consists solely of `/Name N 0 R` entries where at
+ * least one referenced object is itself a `/Type/Font` dict. This avoids
+ * needing full Page -> Resources tree resolution, which is unnecessary for
+ * the single/few-page documents this parser targets (resumes/CVs).
+ */
+function buildFontCMaps(
+  objects: Map<number, string>,
+  streamsByNum: Map<number, StreamObject>
+): Map<string, UnicodeMap> {
+  const fontUnicodeMaps = new Map<number, UnicodeMap>();
+  for (const [num, dict] of objects) {
+    if (!/\/Type\s*\/Font\b/.test(dict)) continue;
+    const toUnicodeMatch = dict.match(/\/ToUnicode\s+(\d+)\s+\d+\s+R/);
+    if (!toUnicodeMatch) continue;
+    const stream = streamsByNum.get(parseInt(toUnicodeMatch[1], 10));
+    if (!stream) continue;
+    const decoded = decodeStreamBytes(stream.dict, stream.data);
+    if (!decoded) continue;
+    const content = bytesToLatin1String(decoded);
+    const map: UnicodeMap = new Map();
+    parseToUnicodeCMap(content, map);
+    if (map.size > 0) fontUnicodeMaps.set(num, map);
+  }
+
+  const resourceNameToCMap = new Map<string, UnicodeMap>();
+  const refEntryRegex = /\/([A-Za-z0-9#+._-]+)\s+(\d+)\s+\d+\s+R/g;
+  const applyFontMapBody = (body: string) => {
+    let m: RegExpExecArray | null;
+    refEntryRegex.lastIndex = 0;
+    while ((m = refEntryRegex.exec(body)) !== null) {
+      const map = fontUnicodeMaps.get(parseInt(m[2], 10));
+      if (map) resourceNameToCMap.set(m[1], map);
+    }
+  };
+  // A page's /Resources dict is often ONE object combining several resource
+  // categories, and its `/Font` entry itself shows up in two different
+  // shapes depending on the PDF writer:
+  //  - inline:   /Font<</F1 5 0 R/F2 6 0 R>>            (e.g. pdftex)
+  //  - indirect: /Font 28 0 R, with object 28 holding    (e.g. LibreOffice)
+  //              the actual <</F1 27 0 R/F2 17 0 R>> map
+  // Font dicts don't nest further, so a non-greedy match up to the first
+  // `>>` is safe for the inline case.
+  const fontKeyRegex = /\/Font\s*(?:<<([^>]*)>>|(\d+)\s+\d+\s+R)/g;
+  for (const [, dict] of objects) {
+    let subMatch: RegExpExecArray | null;
+    fontKeyRegex.lastIndex = 0;
+    while ((subMatch = fontKeyRegex.exec(dict)) !== null) {
+      if (subMatch[1] !== undefined) {
+        applyFontMapBody(subMatch[1]);
+      } else if (subMatch[2] !== undefined) {
+        const target = objects.get(parseInt(subMatch[2], 10));
+        if (target) applyFontMapBody(target);
+      }
+    }
+  }
+
+  return resourceNameToCMap;
 }
 
 function isFlateEncoded(dict: string): boolean {
@@ -324,22 +503,23 @@ function decodeStreamBytes(dict: string, data: Uint8Array): Uint8Array | null {
  */
 export function extractPdfText(bytes: Uint8Array): string {
   const streams = findStreamObjects(bytes);
+  const streamsByNum = new Map(streams.map((s) => [s.num, s] as const));
 
-  // First pass: collect every ToUnicode CMap in the document (used to decode
-  // composite/CID fonts). We merge all fonts' maps together since we don't
-  // resolve per-page font resource dictionaries; for the handful of fonts a
-  // typical resume/CV PDF embeds, this heuristic recovers real text instead
-  // of leaving it as empty/garbled glyph codes.
-  const cmap: UnicodeMap = new Map();
+  // Resolve each `/Name ... Tf` resource name to the CMap of the exact font
+  // it refers to (subsetted fonts restart glyph numbering per-font, so a
+  // merged/shared map would collide across fonts — see buildFontCMaps).
+  const fontCMaps = buildFontCMaps(findAllObjectDicts(bytes), streamsByNum);
+
+  // Fallback: merge every ToUnicode CMap in the document into one map, for
+  // content streams whose active font couldn't be resolved above. Better to
+  // risk an occasional cross-font collision than leave the text empty.
+  const fallbackCmap: UnicodeMap = new Map();
   for (const { dict, data } of streams) {
-    if (!/\/Filter/.test(dict) && dict.trim().length > 0 && !isFlateEncoded(dict)) {
-      // Only bother decoding candidates cheaply below.
-    }
     const decoded = decodeStreamBytes(dict, data);
     if (!decoded) continue;
     const content = bytesToLatin1String(decoded);
     if (content.includes("beginbfchar") || content.includes("beginbfrange")) {
-      parseToUnicodeCMap(content, cmap);
+      parseToUnicodeCMap(content, fallbackCmap);
     }
   }
 
@@ -354,7 +534,7 @@ export function extractPdfText(bytes: Uint8Array): string {
     const content = bytesToLatin1String(decoded);
     if (content.includes("beginbfchar") || content.includes("beginbfrange")) continue;
 
-    const text = extractTextFromContentStream(content, cmap.size > 0 ? cmap : null);
+    const text = extractTextFromContentStream(content, fallbackCmap.size > 0 ? fallbackCmap : null, fontCMaps);
     if (text.trim().length > 0) textChunks.push(text.trim());
   }
 
@@ -366,4 +546,77 @@ export function extractPdfText(bytes: Uint8Array): string {
 export function extractPdfTextFromBase64(base64: string): string {
   const bytes = base64ToBytes(base64);
   return extractPdfText(bytes);
+}
+
+/**
+ * TEMPORARY diagnostic helper — reports why a given PDF failed/succeeded to
+ * extract, without changing extractPdfText's behavior. Not used by the
+ * normal upload flow; wired up only from the CV screen's dev-mode logging
+ * while debugging a specific extraction failure. Safe to delete once the
+ * underlying bug is found and fixed.
+ */
+export function diagnosePdf(bytes: Uint8Array): Record<string, unknown> {
+  const latin1 = bytesToLatin1String(bytes);
+  const streams = findStreamObjects(bytes);
+  const objects = findAllObjectDicts(bytes);
+  const streamsByNum = new Map(streams.map((s) => [s.num, s] as const));
+  const fontCMaps = buildFontCMaps(objects, streamsByNum);
+
+  const filters = new Set<string>();
+  for (const { dict } of streams) {
+    const m = dict.match(/\/Filter\s*(\/[A-Za-z0-9]+|\[[^\]]*\])/);
+    if (m) filters.add(m[1].replace(/\s+/g, ""));
+    else filters.add("(none)");
+  }
+
+  let flateFailures = 0;
+  let decodedContentLikeStreams = 0;
+  let totalContentLikeStreams = 0;
+  let charsFromTjOps = 0;
+  for (const { dict, data } of streams) {
+    if (!isContentLikeDict(dict) || isFontLikeDict(dict)) continue;
+    if (dict.includes("beginbfchar") || dict.includes("beginbfrange")) continue;
+    totalContentLikeStreams++;
+    const decoded = decodeStreamBytes(dict, data);
+    if (!decoded) {
+      if (isFlateEncoded(dict)) flateFailures++;
+      continue;
+    }
+    decodedContentLikeStreams++;
+    const content = bytesToLatin1String(decoded);
+    charsFromTjOps += (content.match(/Tj|TJ|'|"/g) || []).length;
+  }
+
+  let bfcharCount = 0;
+  for (const { dict, data } of streams) {
+    const decoded = decodeStreamBytes(dict, data);
+    if (!decoded) continue;
+    const content = bytesToLatin1String(decoded);
+    bfcharCount += (content.match(/<[0-9a-fA-F]+>\s*<[0-9a-fA-F]+>/g) || []).length;
+  }
+
+  const text = extractPdfText(bytes);
+
+  return {
+    byteLength: bytes.length,
+    pdfVersion: latin1.slice(0, 16).replace(/[^\x20-\x7e]/g, ""),
+    totalIndirectObjects: objects.size,
+    totalStreamObjects: streams.length,
+    filtersSeen: Array.from(filters),
+    hasObjStm: /\/Type\s*\/ObjStm/.test(latin1),
+    hasXRefStream: /\/Type\s*\/XRef/.test(latin1),
+    hasEncrypt: /\/Encrypt\b/.test(latin1),
+    hasType0Font: /\/Subtype\s*\/Type0/.test(latin1),
+    hasIdentityH: /Identity-H/.test(latin1),
+    hasToUnicodeRef: /\/ToUnicode\b/.test(latin1),
+    resolvedFontCMapCount: fontCMaps.size,
+    resolvedFontResourceNames: Array.from(fontCMaps.keys()),
+    totalContentLikeStreams,
+    decodedContentLikeStreams,
+    flateFailures,
+    textShowingOperatorTokens: charsFromTjOps,
+    bfcharPairsFoundRaw: bfcharCount,
+    extractedTextLength: text.length,
+    extractedTextPreview: text.slice(0, 300),
+  };
 }

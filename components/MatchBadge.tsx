@@ -1,11 +1,30 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { matchTier } from "@/utils/jobMatch";
 
-export function MatchBadge({ score }: { score: number }) {
+/**
+ * Job match percentage, colour-coded by tier:
+ * green 70-100 (strong candidate) · amber 40-69 (some gaps) · red 0-39.
+ *
+ * Pass `score={null}` when there's nothing to score against — no CV uploaded
+ * yet, or the listing publishes no skill requirements — so the badge reads
+ * "N/A" instead of an unearned 0%.
+ */
+export function MatchBadge({ score, label }: { score: number | null; label?: string }) {
   const colors = useColors();
-  const bg =
-    score >= 80 ? colors.success : score >= 60 ? colors.warning : colors.destructive;
+
+  if (score === null) {
+    return (
+      <View style={[styles.badge, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+        <Text style={[styles.text, { color: colors.mutedForeground }]}>{label ?? "N/A"}</Text>
+      </View>
+    );
+  }
+
+  const tier = matchTier(score);
+  const bg = tier === "high" ? colors.success : tier === "medium" ? colors.warning : colors.destructive;
+
   return (
     <View style={[styles.badge, { backgroundColor: bg + "22", borderColor: bg }]}>
       <Text style={[styles.text, { color: bg }]}>{score}% match</Text>

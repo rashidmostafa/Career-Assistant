@@ -1,4 +1,4 @@
-import { Search, ArrowLeft, AlertCircle, Edit2, Check, Map, Clock, DollarSign, MapPin, Wifi, RefreshCw, ExternalLink, Send, Link, SlidersHorizontal, X, ShieldCheck, Star } from "lucide-react-native";
+import { Search, ArrowLeft, AlertCircle, Edit2, Check, Map, Clock, DollarSign, MapPin, Wifi, RefreshCw, ExternalLink, Send, Link, SlidersHorizontal, X, ShieldCheck, Star, FileText } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
@@ -46,6 +46,7 @@ export default function JobsScreen() {
     filters,
     setFilters,
     resetFilters,
+    hasCVSkills,
   } = useJobs();
   const { generateRoadmap } = useRoadmap();
   const [search, setSearch] = useState("");
@@ -245,7 +246,7 @@ export default function JobsScreen() {
                   </View>
                 </View>
                 <View style={{ alignSelf: "flex-start", marginTop: 12, marginBottom: 16 }}>
-                  <MatchBadge score={selectedJob.matchScore} />
+                  <MatchBadge score={selectedJob.skillMatch?.applicable ? selectedJob.skillMatch.score : null} />
                 </View>
                 <View style={styles.applyRow}>
                   <TouchableOpacity
@@ -327,6 +328,19 @@ export default function JobsScreen() {
         </View>
       </View>
 
+      {!hasCVSkills && (
+        <TouchableOpacity
+          style={[styles.cvPrompt, { backgroundColor: colors.accent, borderColor: colors.primary + "30" }]}
+          onPress={() => router.push("/(tabs)/cv")}
+          activeOpacity={0.85}
+        >
+          <FileText size={16} color={colors.primary} />
+          <Text style={[styles.cvPromptText, { color: colors.primary }]}>
+            Upload your CV to see how well you match each job
+          </Text>
+        </TouchableOpacity>
+      )}
+
       <View style={styles.searchRow}>
         <View style={[styles.searchWrap, { backgroundColor: colors.card, borderColor: colors.border, flex: 1 }]}>
           <Search size={18} color={colors.mutedForeground} />
@@ -407,7 +421,7 @@ export default function JobsScreen() {
                     )}
                   </View>
                 </View>
-                <MatchBadge score={item.matchScore} />
+                <MatchBadge score={item.skillMatch?.applicable ? item.skillMatch.score : null} />
               </View>
 
               <View style={styles.salaryRow}>
@@ -429,12 +443,35 @@ export default function JobsScreen() {
               </Text>
 
               <View style={styles.skillsRow}>
-                {item.requiredSkills.slice(0, 4).map((s) => (
-                  <View key={s} style={[styles.skillChip, { backgroundColor: colors.secondary }]}>
-                    <Text style={[styles.skillText, { color: colors.foreground }]}>{s}</Text>
-                  </View>
-                ))}
-                {item.requiredSkills.length > 4 && (
+                {item.skillMatch?.applicable
+                  ? // Matched skills first (green ✓), then the gaps (red ✗) —
+                    // the user can see at a glance what they bring and what to learn.
+                    [
+                      ...item.skillMatch.matched.map((s) => ({ skill: s, has: true })),
+                      ...item.skillMatch.missing.map((s) => ({ skill: s, has: false })),
+                    ]
+                      .slice(0, 5)
+                      .map(({ skill, has }) => (
+                        <View
+                          key={skill}
+                          style={[
+                            styles.skillChip,
+                            has
+                              ? { backgroundColor: colors.success + "18", borderWidth: 1, borderColor: colors.success + "40" }
+                              : { backgroundColor: "transparent", borderWidth: 1, borderColor: colors.border },
+                          ]}
+                        >
+                          <Text style={[styles.skillText, { color: has ? colors.success : colors.mutedForeground }]}>
+                            {has ? "✓ " : "✗ "}{skill}
+                          </Text>
+                        </View>
+                      ))
+                  : item.requiredSkills.slice(0, 4).map((s) => (
+                      <View key={s} style={[styles.skillChip, { backgroundColor: colors.secondary }]}>
+                        <Text style={[styles.skillText, { color: colors.foreground }]}>{s}</Text>
+                      </View>
+                    ))}
+                {!item.skillMatch?.applicable && item.requiredSkills.length > 4 && (
                   <View style={[styles.skillChip, { borderWidth: 1, borderColor: colors.border, backgroundColor: "transparent" }]}>
                     <Text style={[styles.skillText, { color: colors.mutedForeground }]}>+{item.requiredSkills.length - 4}</Text>
                   </View>
@@ -524,6 +561,8 @@ const styles = StyleSheet.create({
   updateBadge: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" },
   updateText: { fontSize: 11, fontFamily: "Inter_500Medium" },
   backBtn: { marginRight: 16 },
+  cvPrompt: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 24, marginTop: 16, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 14, borderWidth: 1 },
+  cvPromptText: { flex: 1, fontSize: 13, fontFamily: "Inter_500Medium", lineHeight: 18 },
   searchRow: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 24, marginVertical: 16 },
   searchWrap: { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, borderWidth: 1, shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 2 },
   searchInput: { flex: 1, fontSize: 15, fontFamily: "Inter_500Medium" },

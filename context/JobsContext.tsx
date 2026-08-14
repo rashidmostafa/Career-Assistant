@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { JOB_PLATFORMS, mapUserExperienceToJobLevel } from "@/constants/jobPlatforms";
 import { generateAllBDJobs } from "@/data/bdJobs";
+import { computeJobMatch, type JobMatchResult } from "@/utils/jobMatch";
 import { useAuth } from "./AuthContext";
 import { useCV } from "./CVContext";
 
@@ -27,6 +28,12 @@ export interface JobListing {
   experienceLevel: string;
   verified: boolean;
   topCompany: boolean;
+  /**
+   * How well the user's uploaded CV covers this job's requirements.
+   * Undefined until a CV with detected skills exists — the UI prompts the
+   * user to upload one instead of showing a misleading 0%.
+   */
+  skillMatch?: JobMatchResult;
 }
 
 export interface ApplicationMatch {
@@ -54,6 +61,10 @@ interface JobsContextType {
   lastUpdated: string | null;
   enabledPlatformIds: string[];
   filters: JobFilters;
+  /** Canonical skills detected in the user's CV (empty when no CV uploaded). */
+  cvSkills: string[];
+  /** True once a CV with at least one recognised skill exists. */
+  hasCVSkills: boolean;
   generateCoverLetter: (job: JobListing) => Promise<ApplicationMatch>;
   getMatch: (jobId: string) => ApplicationMatch | undefined;
   filterByRole: (role: string) => JobListing[];
@@ -174,10 +185,18 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   const resetFilters = () => setFiltersState(DEFAULT_FILTERS);
 
-  const allRoleJobs = useMemo(
-    () => strictRoleFilter(ALL_JOBS, user?.targetRole || ""),
-    [user?.targetRole]
-  );
+  const cvSkills = useMemo(() => cvProfile?.skills ?? [], [cvProfile?.skills]);
+  const hasCVSkills = cvSkills.length > 0;
+
+  const allRoleJobs = useMemo(() => {
+    const roleJobs = strictRoleFilter(ALL_JOBS, user?.targetRole || "");
+    if (!hasCVSkills) return roleJobs;
+    // Score every role-matched job against the CV, then surface the jobs the
+    // user is most qualified for first (spec: sort by match %, highest first).
+    return roleJobs
+      .map((job) => ({ ...job, skillMatch: computeJobMatch(cvSkills, job.requiredSkills) }))
+      .sort((a, b) => b.skillMatch.score - a.skillMatch.score);
+  }, [user?.targetRole, cvSkills, hasCVSkills]);
 
   const jobs = useMemo(() => {
     return allRoleJobs.filter((j) => {
@@ -252,6 +271,8 @@ Return JSON: { coverLetter: "3-paragraph professional letter", gapAnalysis: ["3 
         lastUpdated,
         enabledPlatformIds,
         filters,
+        cvSkills,
+        hasCVSkills,
         generateCoverLetter,
         getMatch,
         filterByRole,
