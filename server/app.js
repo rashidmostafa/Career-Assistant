@@ -86,7 +86,7 @@ app.get("/health", (_req, res) => {
     status: "ok",
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
-    version: require("../package.json").version ?? "1.0.0",
+    version: require("./package.json").version ?? "1.0.0",
   });
 });
 
