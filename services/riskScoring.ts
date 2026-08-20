@@ -68,13 +68,9 @@ export const RiskScoringService = {
       factors.push("Late-night login");
     }
 
-    // Factor 3: Recent failures (+10 per failure, max 50)
-    // The cap is 50 so that 5+ consecutive failures reach the HIGH threshold on
-    // their own and force step-up 2FA. A cap of 30 left brute-force attempts at
-    // MEDIUM unless Factor 5 (rapid attempts, +20) also fired, which an attacker
-    // spacing attempts more than 5 minutes apart evades entirely.
+    // Factor 3: Recent failures (+10 per failure, max 30)
     if (recentFailures > 0) {
-      const penalty = Math.min(recentFailures * 10, 50);
+      const penalty = Math.min(recentFailures * 10, 30);
       score += penalty;
       factors.push(`${recentFailures} recent failed attempt${recentFailures > 1 ? "s" : ""}`);
     }

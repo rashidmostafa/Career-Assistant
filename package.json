@@ -89,6 +89,14 @@
     ],
     "setupFiles": [
       "<rootDir>/__tests__/setup.js"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "<rootDir>/__tests__/setup.js"
+    ],
+    "moduleDirectories": [
+      "node_modules",
+      "<rootDir>/server/node_modules"
     ]
   }
 }

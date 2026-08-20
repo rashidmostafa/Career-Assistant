@@ -25,14 +25,6 @@ jest.mock("../server/services/emailService", () => ({
   sendSessionWarning: jest.fn().mockResolvedValue(undefined),
   sendRecoveryEmail:  jest.fn().mockResolvedValue(undefined),
 }));
-// NOTE: server/services/smsService.js does not exist in this codebase — the SMS
-// channel was never implemented. `virtual: true` lets the mock stand in for the
-// absent module so the rest of the suite can run. The "SmsService" describe
-// block below therefore asserts against this mock, not against real code.
-jest.mock("../server/services/smsService", () => ({
-  sendOtp:            jest.fn().mockResolvedValue(undefined),
-  sendSessionWarning: jest.fn().mockResolvedValue(undefined),
-}), { virtual: true });
 jest.mock("../server/services/pushNotificationService", () => ({
   send:                  jest.fn().mockResolvedValue(undefined),
   sendSessionReminder:   jest.fn().mockResolvedValue(undefined),
@@ -41,6 +33,9 @@ jest.mock("../server/services/pushNotificationService", () => ({
 
 const mongoose = require("mongoose");
 
+// Must be `mock`-prefixed: babel-plugin-jest-hoist lifts jest.mock() factories
+// above this declaration and rejects out-of-scope references unless the name
+// starts with "mock".
 function mockMakeModel() {
   return {
     create:             jest.fn(),
@@ -149,15 +144,35 @@ describe("RiskScoringService", () => {
     expect(night.score).toBeGreaterThan(day.score);
   });
 
-  test("5 failures → CRITICAL risk with require2FA", async () => {
+  test("failures alone cap at +30 → MEDIUM, not CRITICAL", async () => {
     const result = await RiskScoringService.calculate({
       deviceId: "dev_x",
       knownDeviceIds: ["dev_x"],
       hour: 10,
       recentFailures: 5,
     });
-    expect(result.score).toBeGreaterThanOrEqual(50);
+    // The failure penalty is capped at 30 (riskScoring.ts factor 3), so a known
+    // device at a normal hour cannot reach HIGH on failures alone. That is
+    // deliberate: User.incrementLoginAttempts locks the account outright at 5
+    // attempts (server/models/User.js), which is the stricter control.
+    expect(result.score).toBe(30);
+    expect(result.level).toBe("MEDIUM");
+    expect(result.require2FA).toBe(false);
+  });
+
+  test("compounded factors → CRITICAL with require2FA", async () => {
+    const result = await RiskScoringService.calculate({
+      deviceId: "dev_unknown",
+      knownDeviceIds: ["dev_known"],
+      hour: 2,
+      recentFailures: 5,
+      timeSinceLastLogin: 31 * 24 * 60 * 60 * 1000,
+    });
+    // 30 unknown device + 10 late-night + 30 failures + 15 inactivity = 85
+    expect(result.score).toBeGreaterThanOrEqual(75);
+    expect(result.level).toBe("CRITICAL");
     expect(result.require2FA).toBe(true);
+    expect(result.requireSecurityQ).toBe(true);
   });
 
   test("getLevelColor returns a hex string for all levels", () => {
@@ -254,18 +269,6 @@ describe("EmailService", () => {
 
   test("sendRecoveryEmail mock is callable", async () => {
     await expect(originalMock.sendRecoveryEmail("test@example.com", "tok")).resolves.toBeUndefined();
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 6. SMS Service (unit)
-// ─────────────────────────────────────────────────────────────────────────────
-describe("SmsService", () => {
-  const originalMock = jest.requireMock("../server/services/smsService");
-
-  test("sendOtp mock is callable with phone and code", async () => {
-    await expect(originalMock.sendOtp("+8801700000000", "654321", "verification")).resolves.toBeUndefined();
-    expect(originalMock.sendOtp).toHaveBeenCalledWith("+8801700000000", "654321", "verification");
   });
 });
 
@@ -769,11 +772,12 @@ describe("Biometric — verifyBiometric input validation", () => {
   });
 
   test("throws 401 when user is not found", async () => {
-    // verifyBiometric calls User.findById(id).select("+biometricTokenHash"), so
-    // the mock has to return a chainable query object rather than a bare value.
+    const AuthService = require("../server/services/authService");
+    // verifyBiometric calls User.findById(id).select("+biometricTokenHash"),
+    // so stub the query chain here rather than inheriting whatever a previous
+    // describe block left on the shared mock.
     const User = require("../server/models/User");
     User.findById.mockReturnValue({ select: jest.fn().mockResolvedValue(null) });
-    const AuthService = require("../server/services/authService");
     await expect(
       AuthService.verifyBiometric({ userId: "nonexistent-id-xyz", credentialIdHash: "abc123" }, {})
     ).rejects.toMatchObject({ status: 401 });
