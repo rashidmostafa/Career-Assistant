@@ -68,6 +68,23 @@ app.use(express.urlencoded({ extended: false }));
 // ── Trust proxy (Heroku/Render/Railway) ───────────────────────────────────────
 app.set("trust proxy", 1);
 
+// ── Health check ──────────────────────────────────────────────────────────────
+// Deliberately mounted BEFORE ipBlockMiddleware and generalLimiter. Render
+// probes this endpoint every few seconds and sends no X-Device-Id, so every
+// probe shared one IP-keyed bucket in generalLimiter (100/hour) and started
+// returning 429 within minutes. Render reads a 429 as a failed health check,
+// pulls the instance out of rotation, and the edge serves 404 until the rate
+// limit window rolls over — a self-inflicted restart loop. A liveness probe
+// must never be rate limited or IP blocked.
+app.get("/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    version: require("./package.json").version ?? "1.0.0",
+  });
+});
+
 // ── Global rate limiting + IP block ──────────────────────────────────────────
 app.use(ipBlockMiddleware);
 app.use(generalLimiter);
@@ -79,16 +96,6 @@ initPassport(app);
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
-
-// ── Health check ──────────────────────────────────────────────────────────────
-app.get("/health", (_req, res) => {
-  res.json({
-    status: "ok",
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
-    version: require("./package.json").version ?? "1.0.0",
-  });
-});
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ message: "Not found." }));
