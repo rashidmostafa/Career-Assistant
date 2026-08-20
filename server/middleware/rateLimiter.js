@@ -5,7 +5,7 @@
  *
  * Limits (keyed by device ID when available, IP as fallback — see
  * rateLimitKey() below):
- *  - Auth endpoints: 10 requests / hour
+ *  - Auth endpoints: 20 requests / hour
  *  - Recovery:  3 attempts / day
  *  - General:   100 requests / hour
  */
@@ -25,7 +25,15 @@ function rateLimitKey(req, prefix = "") {
 
 const authLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 10,
+  // 20, not 10. This budget is pooled across register, login, verify-email,
+  // resend-verification, 2fa/verify, 2fa/resend, reset-password and
+  // biometric/verify — a single signup walkthrough spends four of them, so 10
+  // ran out after two or three honest passes through the flow and showed a
+  // legitimate user "Too many authentication attempts" for the rest of the
+  // hour. Account lockout (5 failed logins, User.incrementLoginAttempts) is
+  // the control that actually stops password guessing; this limiter only
+  // needs to blunt automated volume.
+  max: 20,
   message: { message: "Too many authentication attempts. Please try again in an hour." },
   standardHeaders: true,
   legacyHeaders: false,

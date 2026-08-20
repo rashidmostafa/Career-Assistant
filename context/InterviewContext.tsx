@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useAuth } from "./AuthContext";
 import { chatJSON, isAIConfigured } from "@/services/aiClient";
+import { generateInterviewQuestion, isHawkConfigured } from "@/services/hawkClient";
 
 export interface InterviewQuestion {
   id: string;
@@ -121,6 +122,59 @@ function selectQuestions(jobRole: string, count = 5): InterviewQuestion[] {
   return combined.slice(0, count);
 }
 
+/**
+ * Assemble a session's questions, letting Hawk AI generate a couple of fresh
+ * ones on top of the curated bank.
+ *
+ * Interview Bank is one of the six tasks Hawk was actually fine-tuned on, so it
+ * is used here as a real source rather than a fallback. It is capped at two of
+ * five for two reasons: the curated bank entries carry a vetted `correctAnswer`
+ * that a generated question has no equivalent for, and each generation is a
+ * separate round trip that the user waits on. Requests run concurrently, and
+ * anything that fails or duplicates an existing question is simply dropped —
+ * the bank has already filled every slot before Hawk is consulted.
+ */
+async function buildQuestionSet(jobRole: string, count: number): Promise<InterviewQuestion[]> {
+  const base = selectQuestions(jobRole, count);
+  if (!isHawkConfigured) return base;
+
+  const HAWK_SLOTS = 2;
+  const generated = await Promise.all(
+    Array.from({ length: HAWK_SLOTS }, (_, i) =>
+      generateInterviewQuestion(
+        i === 0
+          ? `Interview preparation for a ${jobRole} role.`
+          : `A technical interview question for a ${jobRole}.`
+      )
+    )
+  );
+
+  const seen = new Set(base.map((q) => q.question.trim().toLowerCase()));
+  const fresh: InterviewQuestion[] = [];
+  for (const result of generated) {
+    if (!result) continue;
+    const text = result.question?.trim();
+    if (!text || seen.has(text.toLowerCase())) continue;
+    seen.add(text.toLowerCase());
+    fresh.push({
+      id: `hawk_${Date.now()}_${fresh.length}`,
+      question: text,
+      category: result.category?.trim() || "General",
+      type: "Technical",
+      level: "Mid",
+      roles: [jobRole],
+      source: "Hawk AI",
+      // Generated questions have no vetted model answer. submitAnswer fills
+      // this in from the evaluator's reply; an empty string keeps the field's
+      // type honest rather than inventing one.
+      correctAnswer: "",
+    });
+  }
+
+  if (fresh.length === 0) return base;
+  return [...base.slice(0, count - fresh.length), ...fresh];
+}
+
 const InterviewContext = createContext<InterviewContextType | null>(null);
 
 export function InterviewProvider({ children }: { children: React.ReactNode }) {
@@ -152,7 +206,7 @@ export function InterviewProvider({ children }: { children: React.ReactNode }) {
     if (!user) return;
     setIsGenerating(true);
     try {
-      const questions = selectQuestions(jobRole, 5);
+      const questions = await buildQuestionSet(jobRole, 5);
       const session: InterviewSession = {
         id: Date.now().toString(),
         userId: user.id,
