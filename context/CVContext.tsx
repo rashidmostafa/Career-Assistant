@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { extractSkillsFromText } from "@/utils/skillsExtract";
+import { chatJSON, isAIConfigured } from "@/services/aiClient";
 import { useAuth } from "./AuthContext";
 
 export interface ATSBreakdown {
@@ -112,7 +113,7 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
     if (!user) return;
     setIsAnalyzing(true);
     try {
-      const apiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+      const apiKey = isAIConfigured;
       const role = user.targetRole || "Professional";
       const expLevel = user.experienceLevel || "";
       const prompt = `You are an ATS (Applicant Tracking System) resume auditor and expert CV writer, giving Turnitin-style detailed feedback. Analyze the following CV text for a ${role} position${expLevel ? ` (${expLevel} level)` : ""}.
@@ -156,18 +157,8 @@ Return ONLY a valid JSON object with exactly these fields, no markdown, no code 
 
       if (apiKey) {
         try {
-          const res = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-            body: JSON.stringify({
-              model: "gpt-4o-mini",
-              messages: [{ role: "user", content: prompt }],
-              response_format: { type: "json_object" },
-            }),
-          });
-          const json = await res.json();
-          if (json.choices?.[0]?.message?.content) {
-            const parsed = JSON.parse(json.choices[0].message.content);
+          const parsed = await chatJSON(prompt);
+          if (parsed) {
             if (parsed.breakdown) {
               breakdown = {
                 keyword: clampScore(parsed.breakdown.keyword),

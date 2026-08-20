@@ -5,6 +5,7 @@ import { generateAllBDJobs } from "@/data/bdJobs";
 import { computeJobMatch, type JobMatchResult } from "@/utils/jobMatch";
 import { useAuth } from "./AuthContext";
 import { useCV } from "./CVContext";
+import { chatJSON, isAIConfigured } from "@/services/aiClient";
 
 export interface JobListing {
   id: string;
@@ -212,7 +213,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     if (!user) throw new Error("Not authenticated");
     setIsGenerating(true);
     try {
-      const apiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+      const apiKey = isAIConfigured;
       const cvText = cvProfile?.fullOptimizedCV || cvProfile?.rawText || "";
       let coverLetter = `Dear Hiring Manager,\n\nI am excited to apply for the ${job.title} position at ${job.company}. With my background in ${user.targetRole || "software engineering"} and ${user.experienceLevel} of experience, I am confident in my ability to make a meaningful contribution.\n\nThe opportunity at ${job.company} particularly excites me because of ${job.description.split(".")[0].toLowerCase()}. I bring expertise in ${job.requiredSkills.slice(0, 3).join(", ")}, which directly aligns with your requirements.\n\nI would welcome the opportunity to discuss how I can contribute to ${job.company}'s mission.\n\nBest regards,\n${user.name}`;
       let gapAnalysis = job.requiredSkills.slice(0, 3).map((skill) => `Strengthen your ${skill} skills to stand out for this role`);
@@ -227,15 +228,9 @@ Candidate CV: ${cvText.slice(0, 800)}
 Candidate: ${user.name}, ${user.experienceLevel} level, targeting ${user.targetRole}
 
 Return JSON: { coverLetter: "3-paragraph professional letter", gapAnalysis: ["3 specific skills to develop for this role"] }`;
-          const res = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-            body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }], response_format: { type: "json_object" } }),
-          });
-          const json = await res.json();
-          const parsed = JSON.parse(json.choices[0].message.content);
-          if (parsed.coverLetter) coverLetter = parsed.coverLetter;
-          if (Array.isArray(parsed.gapAnalysis)) gapAnalysis = parsed.gapAnalysis;
+          const parsed = await chatJSON(prompt);
+          if (parsed?.coverLetter) coverLetter = parsed.coverLetter;
+          if (Array.isArray(parsed?.gapAnalysis)) gapAnalysis = parsed.gapAnalysis;
         } catch { /* use defaults */ }
       }
 

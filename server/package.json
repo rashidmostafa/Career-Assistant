@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
-    "test": "jest --testPathPattern=../__tests__ --forceExit --runInBand"
+    "test": "jest --forceExit --runInBand"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

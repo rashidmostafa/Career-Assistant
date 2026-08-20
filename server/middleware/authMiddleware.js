@@ -4,6 +4,7 @@
  * Attaches req.user (safe) and req.userId.
  */
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const User = require("../models/User");
 
 const JWT_SECRET = process.env.JWT_SECRET || "change_me_in_production";
@@ -71,8 +72,14 @@ function issueAccessToken(userId, deviceId) {
  * issueRefreshToken — creates a signed 30-day token string (stored in DB).
  */
 function issueRefreshToken(userId, deviceId) {
+  // `jti` makes every refresh token unique. Without it the payload is just
+  // {sub, deviceId, type} plus jwt's `iat`, which only has one-second
+  // resolution — so two tokens issued for the same user and device within the
+  // same second are byte-identical, and storing the second one violates the
+  // unique index on sessions.refreshToken (MongoDB E11000). That fires on
+  // login-then-refresh and on the client's automatic refresh-after-401 retry.
   return jwt.sign(
-    { sub: userId, deviceId, type: "refresh" },
+    { sub: userId, deviceId, type: "refresh", jti: crypto.randomUUID() },
     JWT_SECRET,
     { expiresIn: "30d", algorithm: "HS256" },
   );

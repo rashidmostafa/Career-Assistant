@@ -1,0 +1,55 @@
+# Render Blueprint — Career Assistant auth API
+#
+# Deploy: Render Dashboard → New → Blueprint → connect this repo.
+# Render reads this file, creates the service, and prompts for every value
+# marked `sync: false` (those are secrets and are never committed to git).
+#
+# After the first deploy, copy the service URL (https://<name>.onrender.com) and
+# register  <url>/api/auth/google/callback  as an Authorised redirect URI in the
+# Google Cloud Console, or Google Sign-In will fail with redirect_uri_mismatch.
+services:
+  - type: web
+    name: career-assistant-api
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    # Render restarts the instance if this stops returning 200.
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Deep link the OAuth callback redirects back into. Must match the
+      # "scheme" in app.json so the APK receives the tokens.
+      - key: APP_DEEP_LINK
+        value: career-assistant://
+
+      # SERVER_BASE_URL is intentionally omitted: config/passport.js falls back
+      # to RENDER_EXTERNAL_URL, which Render injects with the real service URL.
+
+      # Native mobile clients are not subject to CORS; this only matters if you
+      # also open the web build.
+      - key: ALLOWED_ORIGINS
+        value: http://localhost:8081
+
+      # ── Secrets — Render prompts for these on first deploy ──────────────
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false

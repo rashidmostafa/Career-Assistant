@@ -25,10 +25,14 @@ jest.mock("../server/services/emailService", () => ({
   sendSessionWarning: jest.fn().mockResolvedValue(undefined),
   sendRecoveryEmail:  jest.fn().mockResolvedValue(undefined),
 }));
+// NOTE: server/services/smsService.js does not exist in this codebase — the SMS
+// channel was never implemented. `virtual: true` lets the mock stand in for the
+// absent module so the rest of the suite can run. The "SmsService" describe
+// block below therefore asserts against this mock, not against real code.
 jest.mock("../server/services/smsService", () => ({
   sendOtp:            jest.fn().mockResolvedValue(undefined),
   sendSessionWarning: jest.fn().mockResolvedValue(undefined),
-}));
+}), { virtual: true });
 jest.mock("../server/services/pushNotificationService", () => ({
   send:                  jest.fn().mockResolvedValue(undefined),
   sendSessionReminder:   jest.fn().mockResolvedValue(undefined),
@@ -37,7 +41,7 @@ jest.mock("../server/services/pushNotificationService", () => ({
 
 const mongoose = require("mongoose");
 
-function makeModel() {
+function mockMakeModel() {
   return {
     create:             jest.fn(),
     findOne:            jest.fn(),
@@ -51,9 +55,9 @@ function makeModel() {
   };
 }
 
-jest.mock("../server/models/User",     () => makeModel());
-jest.mock("../server/models/Session",  () => makeModel());
-jest.mock("../server/models/AuditLog", () => makeModel());
+jest.mock("../server/models/User",     () => mockMakeModel());
+jest.mock("../server/models/Session",  () => mockMakeModel());
+jest.mock("../server/models/AuditLog", () => mockMakeModel());
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. OTP Service (client-side)
@@ -765,8 +769,10 @@ describe("Biometric — verifyBiometric input validation", () => {
   });
 
   test("throws 401 when user is not found", async () => {
-    // User.findById returns null for unknown IDs (mocked by jest-mongodb or
-    // the in-memory mock set up in the existing beforeAll)
+    // verifyBiometric calls User.findById(id).select("+biometricTokenHash"), so
+    // the mock has to return a chainable query object rather than a bare value.
+    const User = require("../server/models/User");
+    User.findById.mockReturnValue({ select: jest.fn().mockResolvedValue(null) });
     const AuthService = require("../server/services/authService");
     await expect(
       AuthService.verifyBiometric({ userId: "nonexistent-id-xyz", credentialIdHash: "abc123" }, {})

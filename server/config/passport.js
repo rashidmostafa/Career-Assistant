@@ -49,7 +49,12 @@ async function upsertSocialUser({ provider, providerId, email, name, avatarUrl }
 
 // ── Google Strategy ───────────────────────────────────────────────────────────
 function buildGoogleStrategy() {
-  const callbackURL = `${process.env.SERVER_BASE_URL}/api/auth/google/callback`;
+  // Render injects RENDER_EXTERNAL_URL (e.g. https://foo.onrender.com) automatically.
+  // Preferring it as a fallback means the OAuth callback stays correct even if
+  // SERVER_BASE_URL is unset or stale after a redeploy. This URL must match the
+  // "Authorised redirect URI" registered in the Google Cloud Console exactly.
+  const baseUrl = process.env.SERVER_BASE_URL || process.env.RENDER_EXTERNAL_URL || "";
+  const callbackURL = `${baseUrl}/api/auth/google/callback`;
   return new GoogleStrategy(
     {
       clientID:     process.env.GOOGLE_CLIENT_ID,
@@ -101,6 +106,11 @@ function initPassport(app) {
     cookie: {
       secure:   process.env.NODE_ENV === "production",
       httpOnly: true,
+      // "lax" is required for the Google OAuth round-trip: the callback is a
+      // top-level GET navigation from accounts.google.com back to this server,
+      // and only lax/none send the session cookie on a cross-site navigation.
+      // Set explicitly rather than relying on differing browser defaults.
+      sameSite: "lax",
       maxAge:   10 * 60 * 1000, // 10 min — only needed for the OAuth round-trip
     },
   }));

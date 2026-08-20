@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useAuth } from "./AuthContext";
+import { chatJSON, isAIConfigured } from "@/services/aiClient";
 
 export interface InterviewQuestion {
   id: string;
@@ -174,7 +175,7 @@ export function InterviewProvider({ children }: { children: React.ReactNode }) {
     const q = currentSession.questions.find((x) => x.id === questionId);
     if (!q) throw new Error("Question not found");
 
-    const apiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+    const apiKey = isAIConfigured;
 
     // Scoring criteria: relevance 40%, accuracy 30%, completeness 20%, grammar 10%
     let score = 0;
@@ -216,16 +217,10 @@ Return JSON with:
 - feedback: 2-3 sentences of specific, actionable feedback referencing the actual answer content
 - correctAnswer: ideal model answer for this question (3-5 sentences covering key points)`;
 
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }], response_format: { type: "json_object" } }),
-        });
-        const json = await res.json();
-        const parsed = JSON.parse(json.choices[0].message.content);
-        score = typeof parsed.score === "number" ? Math.min(100, Math.max(0, parsed.score)) : score;
-        feedback = parsed.feedback || feedback;
-        if (parsed.correctAnswer) correctAnswer = parsed.correctAnswer;
+        const parsed = await chatJSON(prompt);
+        score = typeof parsed?.score === "number" ? Math.min(100, Math.max(0, parsed.score)) : score;
+        feedback = parsed?.feedback || feedback;
+        if (parsed?.correctAnswer) correctAnswer = parsed.correctAnswer;
       } catch { /* use fallback scoring */ }
     } else {
       // Heuristic scoring without API

@@ -13,14 +13,43 @@
     },
     "preview": {
       "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "NPM_FLAGS": "--legacy-peer-deps",
+        "EXPO_PUBLIC_API_URL": "https://ban-featured-stickers-icq.trycloudflare.com",
+        "EXPO_PUBLIC_AI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "EXPO_PUBLIC_AI_MODEL": "gemini-3.6-flash"
+      }
+    },
+    "ios-simulator": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      },
       "env": {
         "NPM_FLAGS": "--legacy-peer-deps"
       }
     },
+    "ios-adhoc": {
+      "distribution": "internal",
+      "ios": {
+        "enterpriseProvisioning": "adhoc"
+      },
+      "env": {
+        "NPM_FLAGS": "--legacy-peer-deps",
+        "EXPO_PUBLIC_API_URL": "https://ban-featured-stickers-icq.trycloudflare.com"
+      }
+    },
     "production": {
       "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      },
       "env": {
-        "NPM_FLAGS": "--legacy-peer-deps"
+        "NPM_FLAGS": "--legacy-peer-deps",
+        "EXPO_PUBLIC_API_URL": "https://ban-featured-stickers-icq.trycloudflare.com"
       }
     }
   },
