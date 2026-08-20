@@ -74,7 +74,7 @@ export default function AuthScreen() {
   const { resolvedTheme } = useThemeMode();
   const isDarkMode = resolvedTheme === "dark";
   const {
-    signIn, signUp, confirmEmailVerified, resendVerification,
+    signIn, signUp, confirmEmailVerified, resendVerification, beginEmailVerification,
     pendingVerificationEmail, pendingUserId, biometricAvailable,
     biometricType, setSecurityQuestions,
     loadUserFromServer,
@@ -103,6 +103,22 @@ export default function AuthScreen() {
   const pwRules = getPasswordRules(password);
   const pwValid = Object.values(pwRules).every(Boolean);
 
+  // Starts the 10-minute OTP countdown. Shared by registration and by the
+  // unverified-login recovery path below so the two cannot drift apart.
+  const startOtpCountdown = useCallback(() => {
+    setOtpTimer(10 * 60);
+    if (otpTimerRef.current) clearInterval(otpTimerRef.current);
+    otpTimerRef.current = setInterval(() => {
+      setOtpTimer((t) => {
+        if (t <= 1) {
+          clearInterval(otpTimerRef.current!);
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+  }, []);
+
   // ── Switch modes ─────────────────────────────────────────────────────────────
   const goLogin    = () => { setMode("login");    setError(null); };
   const goRegister = () => { setMode("register"); setError(null); };
@@ -122,12 +138,31 @@ export default function AuthScreen() {
         router.replace("/(tabs)");
       }
     } catch (e: any) {
+      // An account registered but never verified used to dead-end here: the
+      // server refuses the login, and the OTP screen was reachable only as a
+      // step immediately after registration. Reloading the app (or closing it)
+      // stranded the account permanently — the address is taken, so re-
+      // registering fails too. Send the user back into verification with a
+      // fresh code instead.
+      if (e.code === "EMAIL_NOT_VERIFIED") {
+        const addr = email.trim().toLowerCase();
+        try {
+          if (e.userId) await beginEmailVerification(e.userId, addr, password);
+          setMode("verify-otp");
+          startOtpCountdown();
+          await resendVerification();
+          setError(null);
+        } catch (inner: any) {
+          setError(inner.message ?? "Could not resend the verification code.");
+        }
+        return;
+      }
       setError(e.message);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
     } finally {
       setLoading(false);
     }
-  }, [email, password, signIn, router]);
+  }, [email, password, signIn, router, beginEmailVerification, resendVerification, startOtpCountdown]);
 
   // ── Biometric auto-prompt on login screen mount ───────────────────────────────
   React.useEffect(() => {
@@ -183,25 +218,14 @@ export default function AuthScreen() {
       await signUp({ name: name.trim(), email: email.trim().toLowerCase(), password, phone: phone.trim() || undefined, consentGiven });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       setMode("verify-otp");
-      // Start 10-minute countdown timer
-      setOtpTimer(10 * 60);
-      if (otpTimerRef.current) clearInterval(otpTimerRef.current);
-      otpTimerRef.current = setInterval(() => {
-        setOtpTimer((t) => {
-          if (t <= 1) {
-            clearInterval(otpTimerRef.current!);
-            return 0;
-          }
-          return t - 1;
-        });
-      }, 1000);
+      startOtpCountdown();
     } catch (e: any) {
       setError(e.message);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
     } finally {
       setLoading(false);
     }
-  }, [name, email, password, confirmPw, phone, pwValid, consentGiven, signUp]);
+  }, [name, email, password, confirmPw, phone, pwValid, consentGiven, signUp, startOtpCountdown]);
 
   // ── OTP verify ───────────────────────────────────────────────────────────────
   const handleOtpComplete = useCallback(async (code: string) => {

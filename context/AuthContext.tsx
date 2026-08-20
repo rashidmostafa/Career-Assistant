@@ -84,6 +84,9 @@ export interface AuthContextType {
   updateUser: (data: Partial<User>) => Promise<void>;
   completeOnboarding: (background: string, experienceLevel: string, targetRole: string) => Promise<void>;
   resendVerification: () => Promise<void>;
+  /** Re-enter email verification for an account that was registered but never
+   *  verified — e.g. the user reloaded away from the OTP screen. */
+  beginEmailVerification: (userId: string, email: string, password?: string) => Promise<void>;
   /** Verifies the OTP the user typed in against the server and, on success, signs them in. */
   confirmEmailVerified: (otp: string) => Promise<void>;
   // ── New auth API ─────────────────────────────────────────────────────────────
@@ -320,9 +323,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // resendVerification
   // ─────────────────────────────────────────────────────────────────────────────
   const resendVerification = useCallback(async () => {
-    if (!pendingUserId) return;
+    // Previously a silent `return` when pendingUserId was null, which made the
+    // Resend button look like it worked while sending nothing — the user waits
+    // for a code that was never requested.
+    if (!pendingUserId) throw new Error("Session expired. Please sign in again to resend the code.");
     await AuthApiService.resendVerificationEmail({ userId: pendingUserId });
   }, [pendingUserId]);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // beginEmailVerification — restores the pending-verification state so the OTP
+  // screen becomes reachable again after it was navigated away from. Registration
+  // is not the only way into verification: an account can sit unverified
+  // indefinitely, and login is the natural place the user comes back through.
+  // Passing the password lets confirmEmailVerified auto-sign-in as it does after
+  // registration; it is held in a ref and never persisted.
+  // ─────────────────────────────────────────────────────────────────────────────
+  const beginEmailVerification = useCallback(async (userId: string, email: string, password?: string) => {
+    setPendingUserId(userId);
+    setPendingVerificationEmail(email);
+    if (password) pendingPasswordRef.current = password;
+    await AsyncStorage.setItem(STORE.PENDING_USER_ID, userId);
+    await AsyncStorage.setItem(STORE.PENDING_EMAIL, email);
+  }, []);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // 2FA verification
@@ -553,7 +575,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       reauthUrgency, sessionDaysRemaining, riskLevel,
       pending2FAUserId, biometricAvailable, biometricType,
       signIn, signUp, signOut, updateUser,
-      completeOnboarding, resendVerification, confirmEmailVerified,
+      completeOnboarding, resendVerification, confirmEmailVerified, beginEmailVerification,
       verify2FA, loginWithBiometric, enrollBiometric, disableBiometric,
       reauthenticate, setSecurityQuestions, verifySecurityAnswers, getSecurityQuestions,
       signInWithSocial, loadUserFromServer,

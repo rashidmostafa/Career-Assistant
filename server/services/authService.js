@@ -275,7 +275,16 @@ const AuthService = {
 
     // Email verification check
     if (!user.emailVerified) {
-      throw Object.assign(new Error("Please verify your email before signing in."), { status: 403, code: "EMAIL_NOT_VERIFIED" });
+      // userId travels with the error so the client can resend the OTP without
+      // it. Registration stores a pendingUserId locally, but that is lost on
+      // reinstall or cleared storage — and without an id the resend endpoint
+      // has nothing to act on, leaving the account permanently unreachable:
+      // login refuses it, and nothing can re-send the code.
+      throw Object.assign(new Error("Please verify your email before signing in."), {
+        status: 403,
+        code: "EMAIL_NOT_VERIFIED",
+        userId: user._id.toString(),
+      });
     }
 
     // Risk assessment

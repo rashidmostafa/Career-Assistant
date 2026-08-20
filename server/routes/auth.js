@@ -57,7 +57,10 @@ router.post("/login", authLimiter, async (req, res) => {
     const result = await AuthService.login({ ...req.body, deviceId }, req);
     res.json(result);
   } catch (e) {
-    res.status(e.status ?? 500).json({ message: e.message, code: e.code });
+    // userId is forwarded only for EMAIL_NOT_VERIFIED, where the client needs
+    // it to resend the OTP. It is undefined for every other error and drops
+    // out of the JSON, so this leaks nothing on a failed password attempt.
+    res.status(e.status ?? 500).json({ message: e.message, code: e.code, userId: e.userId });
   }
 });
 

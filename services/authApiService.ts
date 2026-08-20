@@ -69,6 +69,9 @@ async function apiFetch<T = unknown>(
       const err = new Error((body as any).message ?? `Request failed: ${res.status}`) as any;
       err.status = res.status;
       err.code   = (body as any).code;
+      // Present on EMAIL_NOT_VERIFIED so the caller can resume verification
+      // without relying on locally stored pending state.
+      err.userId = (body as any).userId;
       throw err;
     }
 
