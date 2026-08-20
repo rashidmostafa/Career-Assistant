@@ -5,12 +5,146 @@
  */
 const nodemailer = require("nodemailer");
 
+// ── Gmail API access-token cache ──────────────────────────────────────────────
+// A refresh token is long-lived; the access token it buys lasts ~1 hour. Cache
+// it rather than paying an extra round-trip to Google on every single email.
+let _gmailToken = { value: null, expiresAt: 0 };
+
+async function gmailAccessToken() {
+  if (_gmailToken.value && Date.now() < _gmailToken.expiresAt) return _gmailToken.value;
+
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id:     process.env.GOOGLE_CLIENT_ID ?? "",
+      client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      refresh_token: process.env.GMAIL_REFRESH_TOKEN ?? "",
+      grant_type:    "refresh_token",
+    }),
+    signal: AbortSignal.timeout(15000),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    // invalid_grant here almost always means the refresh token was revoked or
+    // expired — Google expires refresh tokens after 7 days while the OAuth
+    // consent screen is still in "Testing" mode. Re-run get-gmail-token.js.
+    throw new Error(`Gmail token refresh failed (${res.status}): ${body.error ?? ""} ${body.error_description ?? ""}`.trim());
+  }
+  _gmailToken = {
+    value: body.access_token,
+    // Renew a minute early so a token cannot expire mid-flight.
+    expiresAt: Date.now() + ((body.expires_in ?? 3600) - 60) * 1000,
+  };
+  return _gmailToken.value;
+}
+
+// RFC 2822 message, base64url encoded as the Gmail API requires. Non-ASCII
+// subjects are encoded-word wrapped; the bodies declare UTF-8 directly.
+function buildMimeMessage({ from, to, subject, text, html }) {
+  const encodedSubject = /^[\x00-\x7F]*$/.test(subject)
+    ? subject
+    : `=?UTF-8?B?${Buffer.from(subject, "utf8").toString("base64")}?=`;
+
+  const boundary = `bnd_${Date.now().toString(36)}`;
+  const headers = [
+    `From: ${from}`,
+    `To: ${to}`,
+    `Subject: ${encodedSubject}`,
+    "MIME-Version: 1.0",
+  ];
+
+  let body;
+  if (html) {
+    headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+    body = [
+      "",
+      `--${boundary}`,
+      "Content-Type: text/plain; charset=UTF-8",
+      "",
+      text ?? "",
+      `--${boundary}`,
+      "Content-Type: text/html; charset=UTF-8",
+      "",
+      html,
+      `--${boundary}--`,
+      "",
+    ].join("\r\n");
+  } else {
+    headers.push("Content-Type: text/plain; charset=UTF-8");
+    body = ["", text ?? "", ""].join("\r\n");
+  }
+
+  return Buffer.from(headers.join("\r\n") + body, "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
 let transporter = null;
 
 function getTransporter() {
   if (transporter) return transporter;
 
-  if (process.env.SENDGRID_API_KEY) {
+  // Gmail's HTTP API. Chosen because it needs no domain of your own: Gmail and
+  // Yahoo now enforce DMARC, so third-party senders (Brevo, SendGrid, Resend)
+  // refuse to send *from* an @gmail.com address, and authenticating gmail.com
+  // is impossible since you do not control its DNS. Sending through Gmail
+  // itself sidesteps that entirely — and it runs over HTTPS on 443, so the
+  // blocked SMTP ports do not apply.
+  if (process.env.GMAIL_REFRESH_TOKEN && process.env.GOOGLE_CLIENT_ID) {
+    transporter = {
+      sendMail: async ({ from, to, subject, text, html }) => {
+        const token = await gmailAccessToken();
+        const raw = buildMimeMessage({ from: from ?? FROM, to, subject, text, html });
+        const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ raw }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          throw new Error(`Gmail API ${res.status}: ${body.slice(0, 300)}`);
+        }
+        return { messageId: (await res.json().catch(() => ({}))).id ?? `gmail-${Date.now()}` };
+      },
+    };
+  // Brevo, kept as a second HTTP option. Usable only with a domain you can
+  // authenticate — it will reject an @gmail.com sender under DMARC.
+  } else if (process.env.BREVO_API_KEY) {
+    transporter = {
+      sendMail: async ({ to, subject, text, html }) => {
+        const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+          method: "POST",
+          headers: {
+            "api-key": process.env.BREVO_API_KEY,
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify({
+            sender: { email: FROM, name: APP_NAME },
+            to: [{ email: to }],
+            subject,
+            textContent: text,
+            ...(html ? { htmlContent: html } : {}),
+          }),
+          // Without this a hung request would stall the whole auth response,
+          // which is what made registration appear to freeze for a minute.
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          throw new Error(`Brevo API ${res.status}: ${body.slice(0, 300)}`);
+        }
+        return { messageId: `brevo-${Date.now()}` };
+      },
+    };
+  } else if (process.env.SENDGRID_API_KEY) {
     // SendGrid SMTP relay
     transporter = nodemailer.createTransport({
       host: "smtp.sendgrid.net",
@@ -44,7 +178,10 @@ function getTransporter() {
   return transporter;
 }
 
-const FROM = process.env.SENDGRID_FROM_EMAIL ?? process.env.SMTP_USER ?? "noreply@careerassistant.app";
+// Must be an address verified in the provider's dashboard, or the send is
+// rejected. Brevo calls this a "verified sender"; a plain Gmail address works
+// and needs no domain of your own.
+const FROM = process.env.GMAIL_FROM_EMAIL ?? process.env.BREVO_FROM_EMAIL ?? process.env.SENDGRID_FROM_EMAIL ?? process.env.SMTP_USER ?? "noreply@careerassistant.app";
 const APP_NAME = "Career Assistant";
 
 const EmailService = {

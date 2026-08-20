@@ -170,16 +170,15 @@ const AuthService = {
     const emailOtp = generateOtp();
     storeOtp(`email_verify_${user._id}`, emailOtp);
 
-    // Auto-delete account if email not verified within 10 minutes
-    setTimeout(async () => {
-      try {
-        const u = await User.findById(user._id);
-        if (u && !u.emailVerified) {
-          await User.findByIdAndDelete(user._id);
-          console.log(`[Auth] Deleted unverified account: ${email}`);
-        }
-      } catch (_) {}
-    }, 10 * 60 * 1000);
+    // An auto-delete of unverified accounts after 10 minutes used to live here.
+    // It was removed: the timer deleted real accounts out from under users who
+    // simply took a few minutes to find the email, and the resulting error said
+    // nothing about deletion. It was also unreliable by construction — a bare
+    // setTimeout does not survive the process restarts and idle spin-downs that
+    // are routine on a hosted platform, so it fired unpredictably.
+    //
+    // Nothing needs it now: login returns EMAIL_NOT_VERIFIED with the userId, so
+    // an unverified account can always resume verification and is never stranded.
     await EmailService.sendOtp(user.email, emailOtp, "verification");
     console.log(`[DEV] Email OTP for ${email}: ${emailOtp}`);
 

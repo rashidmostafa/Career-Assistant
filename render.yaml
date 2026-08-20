@@ -53,8 +53,24 @@ services:
       - key: ALLOWED_ORIGINS
         sync: false
 
-      # Email OTP delivery for registration. Without these, sign-up emails
-      # silently fail — see server/services/emailService.js.
+      # Email OTP delivery over the Gmail HTTP API. Render blocks outbound
+      # SMTP (25/465/587), so nodemailer times out there no matter what; and
+      # third-party senders reject an @gmail.com From under DMARC, which rules
+      # them out without a domain of your own. Sending through Gmail itself
+      # avoids both. Generate the refresh token with server/get-gmail-token.js.
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false
+      - key: GMAIL_FROM_EMAIL
+        sync: false
+
+      # Alternative HTTP sender, usable only with a domain you can authenticate.
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_FROM_EMAIL
+        sync: false
+
+      # Retained as a fallback for running the server somewhere without the
+      # port block (a laptop, a VPS). Unused whenever BREVO_API_KEY is set.
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
