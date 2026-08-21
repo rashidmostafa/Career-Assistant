@@ -5,6 +5,7 @@ import * as Haptics from "expo-haptics";
 import { useColors } from "@/hooks/useColors";
 import type { RoadmapWeek, Skill } from "@/context/RoadmapContext";
 import { CircularProgress, SKILL_STATUS_COLORS } from "./CircularProgress";
+import { weekDays } from "@/context/RoadmapContext";
 
 const LEVEL_COLORS = { Beginner: "#22c55e", Intermediate: "#f59e0b", Advanced: "#ef4444" };
 const TRACK_COLORS = { job: "#6366f1", career: "#0891b2" };
@@ -97,7 +98,9 @@ export function WeekCard({ week, onComplete, onToggleSkill, reducedMotion = fals
         <View style={styles.headerLeft}>
           <View style={styles.progressWrap}>
             <CircularProgress progress={weekProgress} level="micro" animate={!reducedMotion} highContrast={highContrast} />
-            <Text style={[styles.weekNum, { color: colors.mutedForeground }]}>Wk {week.weekNumber}</Text>
+            <Text style={[styles.weekNum, { color: colors.mutedForeground }]}>
+              Stage {week.weekNumber} · ~{weekDays(week)}d
+            </Text>
           </View>
 
           <View style={{ flex: 1 }}>
@@ -229,6 +232,9 @@ function SkillChip({ skill, onPress, reducedMotion, highContrast }: { skill: Ski
         <CircularProgress progress={skill.xpPoints} level="individual" status={skill.status} animate={!reducedMotion} highContrast={highContrast} />
         <Text style={[styles.skillName, { color: colors.foreground }]} numberOfLines={1}>{skill.name}</Text>
         <Text style={[styles.skillStatus, { color: statusColor }]}>{skill.status}</Text>
+        {!!skill.estimatedDays && (
+          <Text style={[styles.skillDays, { color: colors.mutedForeground }]}>~{skill.estimatedDays}d</Text>
+        )}
         {skill.inCareerTrack && <Star size={10} color={statusColor} fill={statusColor} />}
       </Animated.View>
     </TouchableOpacity>
@@ -236,21 +242,22 @@ function SkillChip({ skill, onPress, reducedMotion, highContrast }: { skill: Ski
 }
 
 const styles = StyleSheet.create({
+  skillDays: { fontFamily: "Inter_500Medium", fontSize: 12 },
   card: { borderRadius: 20, padding: 16, marginBottom: 10, overflow: "hidden" },
   header: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 10 },
   headerLeft: { flex: 1, flexDirection: "row", gap: 12, alignItems: "flex-start" },
   progressWrap: { alignItems: "center", gap: 4 },
-  weekNum: { fontFamily: "Inter_700Bold", fontSize: 10 },
+  weekNum: { fontFamily: "Inter_700Bold", fontSize: 12 },
   topicRow: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginBottom: 6 },
   topic: { fontFamily: "Inter_700Bold", fontSize: 16, letterSpacing: -0.2, flex: 1 },
   newBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, alignSelf: "flex-start", marginTop: 2 },
-  newBadgeText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 9 },
+  newBadgeText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 11.5 },
   badgeRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   levelBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 },
   dot: { width: 5, height: 5, borderRadius: 2.5 },
-  levelText: { fontFamily: "Inter_700Bold", fontSize: 11 },
+  levelText: { fontFamily: "Inter_700Bold", fontSize: 12.5 },
   trackBadge: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 },
-  trackText: { fontFamily: "Inter_600SemiBold", fontSize: 11 },
+  trackText: { fontFamily: "Inter_600SemiBold", fontSize: 12.5 },
   headerRight: { flexDirection: "row", alignItems: "center", gap: 6 },
   completeBtn: { width: 38, height: 38, borderRadius: 19, borderWidth: 2, alignItems: "center", justifyContent: "center" },
   body: { marginTop: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(0,0,0,0.07)", paddingTop: 14 },
@@ -259,7 +266,7 @@ const styles = StyleSheet.create({
   skillsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   skillChip: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1 },
   skillName: { fontFamily: "Inter_600SemiBold", fontSize: 12, maxWidth: 100 },
-  skillStatus: { fontFamily: "Inter_500Medium", fontSize: 10 },
+  skillStatus: { fontFamily: "Inter_500Medium", fontSize: 12 },
   sectionTitle: { fontFamily: "Inter_700Bold", fontSize: 13, marginBottom: 8 },
   taskRow: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginBottom: 6 },
   taskDot: { width: 6, height: 6, borderRadius: 3, marginTop: 7 },

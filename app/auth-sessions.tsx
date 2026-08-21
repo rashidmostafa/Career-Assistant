@@ -8,7 +8,6 @@ import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -20,6 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { AuthApiService } from "@/services/authApiService";
 import { SessionManager } from "@/services/sessionManager";
+import { showAlert } from "@/utils/alert";
 
 interface SessionRow {
   _id: string;
@@ -64,7 +64,7 @@ export default function SessionsScreen() {
 
   const handleRevoke = useCallback((session: SessionRow) => {
     const isCurrent = session.deviceId === currentDeviceId;
-    Alert.alert(
+    showAlert(
       isCurrent ? "Sign out this device?" : "Revoke this session?",
       isCurrent
         ? "This is your current device — revoking will sign you out immediately."
@@ -88,7 +88,7 @@ export default function SessionsScreen() {
               }
               setSessions((prev) => prev.filter((s) => s._id !== session._id));
             } catch (e: any) {
-              Alert.alert("Error", e.message ?? "Failed to revoke session.");
+              showAlert("Error", e.message ?? "Failed to revoke session.");
             } finally {
               setRevokingId(null);
             }

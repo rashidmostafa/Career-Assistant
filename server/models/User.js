@@ -27,6 +27,19 @@ const UserSchema = new mongoose.Schema({
 
   // ── Profile ───────────────────────────────────────────────────────────────
   targetRole:       { type: String, default: "" },
+  // Every role the user is pursuing. targetRole above stays as the active
+  // one so older clients keep working unchanged; activeRoleId is what the
+  // multi-role client reads.
+  targetRoles: {
+    type: [{
+      id:        { type: String, required: true },
+      title:     { type: String, required: true },
+      createdAt: { type: String },
+      _id:       false,
+    }],
+    default: [],
+  },
+  activeRoleId:     { type: String, default: "" },
   experienceLevel:  { type: String, default: "" },
   background:       { type: String, default: "" },
   photoUri:         { type: String },

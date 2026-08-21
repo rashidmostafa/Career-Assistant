@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { JOB_PLATFORMS, mapUserExperienceToJobLevel } from "@/constants/jobPlatforms";
 import { generateAllBDJobs } from "@/data/bdJobs";
+import { fetchLiveJobs } from "@/services/jobFeedService";
 import { computeJobMatch, type JobMatchResult } from "@/utils/jobMatch";
 import { useAuth } from "./AuthContext";
 import { useCV } from "./CVContext";
@@ -66,6 +67,12 @@ interface JobsContextType {
   cvSkills: string[];
   /** True once a CV with at least one recognised skill exists. */
   hasCVSkills: boolean;
+  /** Live sources that answered, e.g. ["Remotive", "Arbeitnow"]. */
+  jobSources: string[];
+  /** True when no live source could be reached and sample data is showing. */
+  usingFallback: boolean;
+  /** Re-fetches from the live sources. */
+  refreshJobs: () => Promise<void>;
   generateCoverLetter: (job: JobListing) => Promise<ApplicationMatch>;
   getMatch: (jobId: string) => ApplicationMatch | undefined;
   filterByRole: (role: string) => JobListing[];
@@ -76,7 +83,12 @@ interface JobsContextType {
   resetFilters: () => void;
 }
 
-const ALL_JOBS: JobListing[] = generateAllBDJobs();
+/**
+ * Fallback only. generateAllBDJobs() invents listings from role templates and
+ * company names — they are not real vacancies, so they are used solely when
+ * every live source is unreachable, and the UI says so when they are showing.
+ */
+const FALLBACK_JOBS: JobListing[] = generateAllBDJobs();
 
 const ROLE_KEYWORD_MAP: Record<string, string[]> = {
   "react developer": ["react developer", "react engineer", "react frontend"],
@@ -136,6 +148,8 @@ const JobsContext = createContext<JobsContextType | null>(null);
 
 export function JobsProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
+  // Matches and applications belong to the role they were made for.
+  const roleKey = user?.activeRoleId || "default";
   const { cvProfile } = useCV();
   const [matches, setMatches] = useState<ApplicationMatch[]>([]);
   const [appliedJobIds, setAppliedJobIds] = useState<string[]>([]);
@@ -147,17 +161,21 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   const load = useCallback(async () => {
     if (!user) { setMatches([]); setAppliedJobIds([]); setEnabledPlatformIds(JOB_PLATFORMS.map((p) => p.id)); return; }
-    const data = await AsyncStorage.getItem(`matches_${user.id}`);
-    if (data) setMatches(JSON.parse(data));
-    const applied = await AsyncStorage.getItem(`applied_${user.id}`);
-    if (applied) setAppliedJobIds(JSON.parse(applied));
+    // Assigned unconditionally: switching to a role with no matches yet has to
+    // clear the previous role's, or its cover letters and applied flags would
+    // appear to belong to the new role.
+    const data = await AsyncStorage.getItem(`matches_${user.id}_${roleKey}`);
+    setMatches(data ? JSON.parse(data) : []);
+    const applied = await AsyncStorage.getItem(`applied_${user.id}_${roleKey}`);
+    setAppliedJobIds(applied ? JSON.parse(applied) : []);
     const platforms = await AsyncStorage.getItem(`platforms_${user.id}`);
     if (platforms) {
       setEnabledPlatformIds(JSON.parse(platforms));
     } else {
       setEnabledPlatformIds(JOB_PLATFORMS.map((p) => p.id));
     }
-  }, [user]);
+    // roleKey included so a role switch reloads that role's matches.
+  }, [user, roleKey]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -186,18 +204,50 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   const resetFilters = () => setFiltersState(DEFAULT_FILTERS);
 
+  const [liveJobs, setLiveJobs] = useState<JobListing[]>([]);
+  const [jobSources, setJobSources] = useState<string[]>([]);
+  const [usingFallback, setUsingFallback] = useState(false);
+  const [isFetchingJobs, setIsFetchingJobs] = useState(false);
+
+  const refreshJobs = useCallback(async () => {
+    setIsFetchingJobs(true);
+    try {
+      const { jobs: fetched, sources, offline } = await fetchLiveJobs(user?.targetRole);
+      if (offline || fetched.length === 0) {
+        // Keep the screen usable without a connection, but flag it rather than
+        // passing invented listings off as real vacancies.
+        setLiveJobs(FALLBACK_JOBS);
+        setUsingFallback(true);
+        setJobSources([]);
+      } else {
+        setLiveJobs(fetched);
+        setUsingFallback(false);
+        setJobSources(sources);
+      }
+    } finally {
+      setIsFetchingJobs(false);
+    }
+  }, [user?.targetRole]);
+
+  useEffect(() => { refreshJobs(); }, [refreshJobs]);
+
   const cvSkills = useMemo(() => cvProfile?.skills ?? [], [cvProfile?.skills]);
   const hasCVSkills = cvSkills.length > 0;
 
   const allRoleJobs = useMemo(() => {
-    const roleJobs = strictRoleFilter(ALL_JOBS, user?.targetRole || "");
+    // Live results are already query-filtered at the source; applying the
+    // strict local role filter on top would discard relevant postings whose
+    // titles simply word things differently.
+    const roleJobs = usingFallback
+      ? strictRoleFilter(liveJobs, user?.targetRole || "")
+      : liveJobs;
     if (!hasCVSkills) return roleJobs;
     // Score every role-matched job against the CV, then surface the jobs the
     // user is most qualified for first (spec: sort by match %, highest first).
     return roleJobs
       .map((job) => ({ ...job, skillMatch: computeJobMatch(cvSkills, job.requiredSkills) }))
       .sort((a, b) => b.skillMatch.score - a.skillMatch.score);
-  }, [user?.targetRole, cvSkills, hasCVSkills]);
+  }, [user?.targetRole, cvSkills, hasCVSkills, liveJobs, usingFallback]);
 
   const jobs = useMemo(() => {
     return allRoleJobs.filter((j) => {
@@ -236,7 +286,7 @@ Return JSON: { coverLetter: "3-paragraph professional letter", gapAnalysis: ["3 
 
       const match: ApplicationMatch = { id: Date.now().toString(), userId: user.id, jobId: job.id, gapAnalysis, coverLetter, appliedAt: new Date().toISOString() };
       const updated = [...matches.filter((m) => m.jobId !== job.id), match];
-      await AsyncStorage.setItem(`matches_${user.id}`, JSON.stringify(updated));
+      await AsyncStorage.setItem(`matches_${user.id}_${roleKey}`, JSON.stringify(updated));
       setMatches(updated);
       return match;
     } finally {
@@ -247,12 +297,12 @@ Return JSON: { coverLetter: "3-paragraph professional letter", gapAnalysis: ["3 
   const markApplied = async (jobId: string) => {
     if (!user) return;
     const updated = [...appliedJobIds.filter((id) => id !== jobId), jobId];
-    await AsyncStorage.setItem(`applied_${user.id}`, JSON.stringify(updated));
+    await AsyncStorage.setItem(`applied_${user.id}_${roleKey}`, JSON.stringify(updated));
     setAppliedJobIds(updated);
   };
 
   const getMatch = (jobId: string) => matches.find((m) => m.jobId === jobId);
-  const filterByRole = (role: string) => strictRoleFilter(ALL_JOBS, role);
+  const filterByRole = (role: string) => strictRoleFilter(liveJobs, role);
 
   return (
     <JobsContext.Provider
@@ -262,12 +312,15 @@ Return JSON: { coverLetter: "3-paragraph professional letter", gapAnalysis: ["3 
         matches,
         appliedJobIds,
         isGenerating,
-        isLoading,
+        isLoading: isLoading || isFetchingJobs,
         lastUpdated,
         enabledPlatformIds,
         filters,
         cvSkills,
         hasCVSkills,
+        jobSources,
+        usingFallback,
+        refreshJobs,
         generateCoverLetter,
         getMatch,
         filterByRole,

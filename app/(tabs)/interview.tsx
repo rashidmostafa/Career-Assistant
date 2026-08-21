@@ -3,7 +3,6 @@ import * as Haptics from "expo-haptics";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   ScrollView,
   StyleSheet,
@@ -17,6 +16,7 @@ import { ScoreRing } from "@/components/ScoreRing";
 import { useInterview } from "@/context/InterviewContext";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { showAlert } from "@/utils/alert";
 
 const TYPE_COLORS: Record<string, string> = {
   Technical: "#3b82f6",
@@ -163,7 +163,7 @@ export default function InterviewScreen() {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border, backgroundColor: colors.background }]}>
-          <TouchableOpacity onPress={() => Alert.alert("Exit", "End this session?", [
+          <TouchableOpacity onPress={() => showAlert("Exit", "End this session?", [
             { text: "Cancel", style: "cancel" },
             { text: "Exit", style: "destructive", onPress: () => { setPhase("home"); setLastFeedback(null); } },
           ])}>

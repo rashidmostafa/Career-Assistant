@@ -14,7 +14,6 @@ import { useRouter } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -35,6 +34,7 @@ import { BiometricButton } from "@/components/auth/BiometricButton";
 import { SecurityQuestionsForm } from "@/components/auth/SecurityQuestionsForm";
 import { SocialAuthService } from "@/services/socialAuthService";
 import { useBiometric } from "@/hooks/useBiometric";
+import { showAlert } from "@/utils/alert";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -658,7 +658,7 @@ function SocialRow({ colors }: any) {
       router.replace("/(tabs)");
     } catch (e: any) {
       if (e?.message !== "Sign-in was cancelled.") {
-        Alert.alert("Google Sign-In Failed", e?.message ?? "Please try again.");
+        showAlert("Google Sign-In Failed", e?.message ?? "Please try again.");
       }
     } finally {
       setGoogleLoading(false);

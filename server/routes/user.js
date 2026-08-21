@@ -23,7 +23,7 @@ router.get("/profile", authenticate, async (req, res) => {
 
 router.patch("/profile", authenticate, async (req, res) => {
   try {
-    const allowed = ["name", "phone", "targetRole", "experienceLevel", "background", "photoUri", "onboardingComplete"];
+    const allowed = ["name", "phone", "targetRole", "targetRoles", "activeRoleId", "experienceLevel", "background", "photoUri", "onboardingComplete"];
     const update = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];

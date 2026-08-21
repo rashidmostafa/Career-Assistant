@@ -5,7 +5,6 @@ import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Linking,
   Modal,
@@ -23,7 +22,9 @@ import { useJobs, type JobListing } from "@/context/JobsContext";
 import { useRoadmap } from "@/context/RoadmapContext";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { JOB_PLATFORMS, PLATFORM_CATEGORY_LABELS, BD_LOCATIONS, JOB_TYPES, JOB_EXPERIENCE_LEVELS, PlatformCategory } from "@/constants/jobPlatforms";
+import { JOB_PLATFORMS, PLATFORM_CATEGORY_LABELS, BD_LOCATIONS, JOB_TYPES, JOB_EXPERIENCE_LEVELS, getPlatformSearchUrl, type JobPlatform, PlatformCategory } from "@/constants/jobPlatforms";
+import { showAlert } from "@/utils/alert";
+import { RoleSwitcher } from "@/components/RoleSwitcher";
 
 const PLATFORM_CATEGORIES: PlatformCategory[] = ["general", "blue-collar", "international"];
 
@@ -47,6 +48,9 @@ export default function JobsScreen() {
     setFilters,
     resetFilters,
     hasCVSkills,
+    jobSources,
+    usingFallback,
+    refreshJobs,
   } = useJobs();
   const { generateRoadmap } = useRoadmap();
   const [search, setSearch] = useState("");
@@ -81,7 +85,7 @@ export default function JobsScreen() {
       await generateRoadmap(match.gapAnalysis, user?.targetRole || job.title, user?.experienceLevel);
       setSelectedJob(job);
     } catch {
-      Alert.alert("Error", "Could not generate cover letter. Try again.");
+      showAlert("Error", "Could not generate cover letter. Try again.");
     } finally {
       setGeneratingId(null);
     }
@@ -89,15 +93,28 @@ export default function JobsScreen() {
 
   const openPlatform = (job: JobListing) => {
     Linking.openURL(job.originalUrl).catch(() => {
-      Alert.alert(
+      showAlert(
         "Couldn't open link",
         `${job.platformName} may be unavailable right now. This posting was aggregated from ${job.platformName} — try again shortly or search for "${job.title}" directly on their site.`
       );
     });
   };
 
+  /**
+   * Opens a job board's own search results for the user's target role.
+   * The live feed covers remote and European listings; Bangladeshi boards
+   * publish no public API, so reaching them directly is how local roles are
+   * found rather than through invented listings.
+   */
+  const openJobSite = (platform: JobPlatform) => {
+    const url = getPlatformSearchUrl(platform, user?.targetRole);
+    Linking.openURL(url).catch(() => {
+      showAlert("Couldn't open link", `${platform.name} may be unavailable right now.`);
+    });
+  };
+
   const handleApplyNow = (job: JobListing) => {
-    Alert.alert(
+    showAlert(
       "Apply to " + job.company,
       `You're about to open the job posting for "${job.title}" on ${job.platformName}. Ready?`,
       [
@@ -177,6 +194,19 @@ export default function JobsScreen() {
                     >
                       <Text style={styles.platformIcon}>{platform.icon}</Text>
                       <Text style={[styles.platformName, { color: colors.foreground }]}>{platform.name}</Text>
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          // Stop the press from also toggling the row's filter.
+                          e.stopPropagation();
+                          openJobSite(platform);
+                        }}
+                        hitSlop={8}
+                        style={styles.platformOpenBtn}
+                        accessibilityRole="link"
+                        accessibilityLabel={`Open ${platform.name} in your browser`}
+                      >
+                        <ExternalLink size={16} color={jobsColor} />
+                      </TouchableOpacity>
                       <View style={[styles.toggleTrack, { backgroundColor: enabled ? jobsColor : colors.border }]}>
                         <View style={[styles.toggleThumb, { alignSelf: enabled ? "flex-end" : "flex-start", backgroundColor: "#fff" }]} />
                       </View>
@@ -340,6 +370,49 @@ export default function JobsScreen() {
           </Text>
         </TouchableOpacity>
       )}
+
+      {/* Where these listings came from. Sample data is labelled as such rather
+          than presented as live vacancies. */}
+      <RoleSwitcher accent={jobsColor} />
+
+      <View style={styles.sourceRow}>
+        <Text style={[styles.sourceText, { color: usingFallback ? colors.warning : colors.mutedForeground }]}>
+          {usingFallback
+            ? "Offline — showing sample roles, not live vacancies"
+            : jobSources.length
+              ? `Live from ${jobSources.join(" · ")}`
+              : "Loading live listings…"}
+        </Text>
+        <TouchableOpacity onPress={refreshJobs} hitSlop={8} accessibilityRole="button" accessibilityLabel="Refresh job listings">
+          <RefreshCw size={15} color={jobsColor} />
+        </TouchableOpacity>
+      </View>
+
+      {/* The live feed covers remote and European roles. Bangladeshi boards have
+          no public API, so they are reached directly instead of being faked. */}
+      <View style={styles.siteStrip}>
+        <Text style={[styles.siteStripLabel, { color: colors.mutedForeground }]}>BROWSE JOB SITES</Text>
+        <Text style={[styles.siteStripHint, { color: colors.mutedForeground }]}>
+          {user?.targetRole
+            ? `Opens each site's results for "${user.targetRole}".`
+            : "Set a target role in your profile to search these directly."}
+        </Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.siteChips}>
+          {JOB_PLATFORMS.map((platform) => (
+            <TouchableOpacity
+              key={platform.id}
+              style={[styles.siteChip, { borderColor: colors.border, backgroundColor: colors.card }]}
+              onPress={() => openJobSite(platform)}
+              accessibilityRole="link"
+              accessibilityLabel={`Search ${platform.name}`}
+            >
+              <Text style={{ fontSize: 14 }}>{platform.icon}</Text>
+              <Text style={[styles.siteChipText, { color: colors.foreground }]}>{platform.shortName}</Text>
+              <ExternalLink size={13} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       <View style={styles.searchRow}>
         <View style={[styles.searchWrap, { backgroundColor: colors.card, borderColor: colors.border, flex: 1 }]}>
@@ -548,6 +621,15 @@ export default function JobsScreen() {
 }
 
 const styles = StyleSheet.create({
+  platformOpenBtn: { padding: 6, marginRight: 4 },
+  sourceRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, marginBottom: 10, gap: 10 },
+  sourceText: { fontFamily: "Inter_500Medium", fontSize: 12.5, flex: 1 },
+  siteStrip: { marginBottom: 16, paddingHorizontal: 20 },
+  siteStripLabel: { fontFamily: "Inter_600SemiBold", fontSize: 12.5, letterSpacing: 0.4, marginBottom: 4 },
+  siteStripHint: { fontFamily: "Inter_400Regular", fontSize: 13, lineHeight: 18, marginBottom: 10 },
+  siteChips: { flexDirection: "row", gap: 8 },
+  siteChip: { flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 13, paddingVertical: 9, borderRadius: 999, borderWidth: 1 },
+  siteChipText: { fontFamily: "Inter_600SemiBold", fontSize: 13.5 },
   container: { flex: 1 },
   headerWrap: { paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth, position: "relative", overflow: "hidden" },
   headerGradient: { ...StyleSheet.absoluteFillObject },

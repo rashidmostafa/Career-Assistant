@@ -5,7 +5,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
-  Alert,
   FlatList,
   Image,
   Modal,
@@ -23,6 +22,7 @@ import { useCV } from "@/context/CVContext";
 import { useJobs } from "@/context/JobsContext";
 import { useRoadmap } from "@/context/RoadmapContext";
 import { useColors } from "@/hooks/useColors";
+import { showAlert } from "@/utils/alert";
 
 const BACKGROUND_OPTIONS = [
   "Computer Science / IT",
@@ -147,7 +147,7 @@ export default function ProfileScreen() {
   const colors = useColors() as any;
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, signOut, updateUser } = useAuth();
+  const { user, signOut, updateUser, addTargetRole, removeTargetRole, setActiveRole } = useAuth();
   const { cvProfile, clearCV } = useCV();
   const { appliedJobIds } = useJobs();
   const { roadmap, clearRoadmap } = useRoadmap();
@@ -176,7 +176,7 @@ export default function ProfileScreen() {
       return;
     }
 
-    Alert.alert(
+    showAlert(
       "Change Background?",
       `Changing your background will reset your target role. You must select a new target role related to "${newBackground}".`,
       [
@@ -195,7 +195,7 @@ export default function ProfileScreen() {
 
   const handleOpenRolePicker = () => {
     if (!background) {
-      Alert.alert("Select Background First", "Please select your background before choosing a target role.");
+      showAlert("Select Background First", "Please select your background before choosing a target role.");
       return;
     }
     setActivePicker("role");
@@ -216,25 +216,26 @@ export default function ProfileScreen() {
 
     if (errors.background || errors.targetRole) {
       setFieldErrors(errors);
-      Alert.alert("Cannot Save Profile", "Target role must be related to your selected background.");
+      showAlert("Cannot Save Profile", "Target role must be related to your selected background.");
       return;
     }
     setFieldErrors({});
 
     const roleChanged = targetRole !== user?.targetRole && targetRole.trim() !== "";
     if (roleChanged) {
-      Alert.alert(
-        "Change Target Role?",
-        `Changing your target role from "${user?.targetRole}" to "${targetRole}" will reset your CV analysis, job matches, and roadmap.\n\nContinue?`,
+      // Adding rather than replacing. Roadmaps, CV analyses and matches are
+      // stored per role, so the previous role's work is untouched and is still
+      // there when the user switches back — where this used to delete all of it.
+      showAlert(
+        "Add target role",
+        `Add "${targetRole}" and switch to it?\n\nYour "${user?.targetRole}" roadmap, CV analysis and job matches are kept — switch back any time.`,
         [
           { text: "Cancel", style: "cancel" },
           {
-            text: "Reset & Change",
-            style: "destructive",
+            text: "Add & switch",
             onPress: async () => {
-              await clearCV();
-              await clearRoadmap();
-              await updateUser({ name, targetRole, experienceLevel: expLevel, background });
+              await updateUser({ name, experienceLevel: expLevel, background });
+              await addTargetRole(targetRole);
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
               setEditing(false);
             },
@@ -250,13 +251,13 @@ export default function ProfileScreen() {
 
   const handlePickPhoto = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) { Alert.alert("Permission Required", "Please allow access to your photo library."); return; }
+    if (!permission.granted) { showAlert("Permission Required", "Please allow access to your photo library."); return; }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, aspect: [1, 1], quality: 0.8, allowsMultipleSelection: false });
     if (!result.canceled && result.assets[0]) { await updateUser({ photoUri: result.assets[0].uri }); }
   };
 
   const handleSignOut = () => {
-    Alert.alert("Sign Out", "Are you sure?", [
+    showAlert("Sign Out", "Are you sure?", [
       { text: "Cancel", style: "cancel" },
       { text: "Sign Out", style: "destructive", onPress: signOut },
     ]);
@@ -428,6 +429,54 @@ export default function ProfileScreen() {
             <ChevronRight size={20} color={colors.mutedForeground} />
           </TouchableOpacity>
 
+          {(user?.targetRoles?.length ?? 0) > 0 && (
+            <View style={[styles.rolesCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.rolesTitle, { color: colors.foreground }]}>Target roles</Text>
+              <Text style={[styles.rolesHint, { color: colors.mutedForeground }]}>
+                Each role keeps its own roadmap, CV analysis and job matches.
+              </Text>
+              {user!.targetRoles.map((role) => {
+                const active = role.id === user!.activeRoleId;
+                return (
+                  <View key={role.id} style={[styles.roleRow, { borderColor: colors.border }]}>
+                    <TouchableOpacity
+                      style={styles.roleRowMain}
+                      onPress={() => !active && setActiveRole(role.id)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      accessibilityLabel={`${role.title}${active ? ", showing" : ", switch to this role"}`}
+                    >
+                      <View style={[styles.roleDot, { backgroundColor: active ? colors.primary : colors.border }]} />
+                      <Text style={[styles.roleTitle, { color: colors.foreground }]} numberOfLines={1}>{role.title}</Text>
+                      {active && (
+                        <Text style={[styles.roleActive, { color: colors.primary }]}>Showing</Text>
+                      )}
+                    </TouchableOpacity>
+                    {user!.targetRoles.length > 1 && (
+                      <TouchableOpacity
+                        hitSlop={8}
+                        onPress={() =>
+                          showAlert(
+                            "Remove role",
+                            `Remove "${role.title}"? Its roadmap, CV analysis and job matches are deleted.`,
+                            [
+                              { text: "Cancel", style: "cancel" },
+                              { text: "Remove", style: "destructive", onPress: () => removeTargetRole(role.id) },
+                            ],
+                          )
+                        }
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove ${role.title}`}
+                      >
+                        <X size={17} color={colors.mutedForeground} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
           <TouchableOpacity style={[styles.signOutBtn, { borderColor: colors.destructive, backgroundColor: colors.card }]} onPress={handleSignOut} activeOpacity={0.85}>
             <LogOut size={20} color={colors.destructive} />
             <Text style={[styles.signOutText, { color: colors.destructive }]}>Sign Out</Text>
@@ -439,6 +488,14 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
+  rolesCard: { borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 14 },
+  rolesTitle: { fontFamily: "Inter_700Bold", fontSize: 16 },
+  rolesHint: { fontFamily: "Inter_400Regular", fontSize: 13, lineHeight: 18, marginTop: 3, marginBottom: 12 },
+  roleRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 11, borderTopWidth: 1 },
+  roleRowMain: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
+  roleDot: { width: 9, height: 9, borderRadius: 5 },
+  roleTitle: { fontFamily: "Inter_600SemiBold", fontSize: 14.5, flex: 1 },
+  roleActive: { fontFamily: "Inter_600SemiBold", fontSize: 12 },
   container: { flex: 1 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth, position: "relative", overflow: "hidden" },
   headerGradient: { ...StyleSheet.absoluteFillObject },

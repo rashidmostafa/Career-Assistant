@@ -15,6 +15,7 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import { RoadmapProvider } from "@/context/RoadmapContext";
 import { InterviewProvider } from "@/context/InterviewContext";
 import { PortfolioProvider } from "@/context/PortfolioContext";
+import { DialogProvider } from "@/components/ui/AppDialog";
 import { SessionManager } from "@/services/sessionManager";
 
 SplashScreen.preventAutoHideAsync();
@@ -166,6 +167,7 @@ function RootLayoutNav() {
         <RoadmapProvider>
           <InterviewProvider>
             <PortfolioProvider>
+              <DialogProvider>
               {/* OAuth deep link listener — must be inside AuthProvider */}
               <OAuthDeepLinkHandler onTokensReceived={handleOAuthTokens} />
               <AuthGate isOAuthLoading={isOAuthLoading}>
@@ -181,6 +183,7 @@ function RootLayoutNav() {
                   <Stack.Screen name="onboarding"    options={{ headerShown: false }} />
                 </Stack>
               </AuthGate>
+              </DialogProvider>
             </PortfolioProvider>
           </InterviewProvider>
         </RoadmapProvider>

@@ -66,9 +66,9 @@ const styles = StyleSheet.create({
   statRow: { flexDirection: "row", gap: 16 },
   stat: { alignItems: "center" },
   statValue: { fontFamily: "Inter_700Bold", fontSize: 20, letterSpacing: -0.5 },
-  statLabel: { fontFamily: "Inter_500Medium", fontSize: 11, marginTop: 1 },
+  statLabel: { fontFamily: "Inter_500Medium", fontSize: 12.5, marginTop: 1 },
   dynamicBadge: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
-  dynamicDot: { color: "#10b981", fontSize: 10 },
-  dynamicText: { fontFamily: "Inter_600SemiBold", fontSize: 11 },
-  lastUpdated: { fontFamily: "Inter_500Medium", fontSize: 11, marginTop: 12, textAlign: "right" },
+  dynamicDot: { color: "#10b981", fontSize: 12 },
+  dynamicText: { fontFamily: "Inter_600SemiBold", fontSize: 12.5 },
+  lastUpdated: { fontFamily: "Inter_500Medium", fontSize: 12.5, marginTop: 12, textAlign: "right" },
 });

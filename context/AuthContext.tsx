@@ -35,12 +35,29 @@ export interface SecurityQuestion {
   answer: string; // hashed on server; never stored in plaintext client-side
 }
 
+/** One career path the user is pursuing. */
+export interface TargetRole {
+  id: string;
+  title: string;
+  createdAt: string;
+}
+
 export interface User {
   id: string;
   name: string;
   email: string;
   phone?: string;
+  /**
+   * The active role's title. Retained as the single source every existing
+   * screen already reads, and kept in sync with activeRoleId — so switching
+   * roles updates it and nothing downstream has to know about the array.
+   */
   targetRole: string;
+  /** Every role the user is pursuing. Each has its own roadmap, CV analysis,
+   *  job matches and interview history — nothing is shared between them. */
+  targetRoles: TargetRole[];
+  /** Which role the app is currently showing. */
+  activeRoleId: string;
   experienceLevel: string;
   background?: string;
   onboardingComplete?: boolean;
@@ -83,6 +100,11 @@ export interface AuthContextType {
   signOut: () => Promise<void>;
   updateUser: (data: Partial<User>) => Promise<void>;
   completeOnboarding: (background: string, experienceLevel: string, targetRole: string) => Promise<void>;
+  /** The role currently in view; all role-scoped screens follow it. */
+  activeRole: TargetRole | null;
+  setActiveRole: (roleId: string) => Promise<void>;
+  addTargetRole: (title: string) => Promise<void>;
+  removeTargetRole: (roleId: string) => Promise<void>;
   resendVerification: () => Promise<void>;
   /** Re-enter email verification for an account that was registered but never
    *  verified — e.g. the user reloaded away from the OTP screen. */
@@ -119,6 +141,47 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 /** Normalises a raw server user document (Mongo `_id`, date strings, …) into our client `User` shape. */
+/**
+ * Accounts created before multi-role support carry only a `targetRole` string.
+ * Promote it to a one-entry array so every consumer can assume the array
+ * exists; without this an existing user would open the app with no active role
+ * and see empty roadmaps and job lists.
+ */
+function normalizeRoles(raw: any): { targetRole: string; targetRoles: TargetRole[]; activeRoleId: string } {
+  const list: TargetRole[] = Array.isArray(raw?.targetRoles) && raw.targetRoles.length
+    ? raw.targetRoles.filter((r: any) => r && typeof r.title === "string")
+    : raw?.targetRole
+      ? [{ id: makeRoleId(raw.targetRole), title: raw.targetRole, createdAt: new Date().toISOString() }]
+      : [];
+
+  const activeRoleId = list.some((r) => r.id === raw?.activeRoleId)
+    ? raw.activeRoleId
+    : (list[0]?.id ?? "");
+
+  return {
+    targetRole: list.find((r) => r.id === activeRoleId)?.title ?? "",
+    targetRoles: list,
+    activeRoleId,
+  };
+}
+
+/**
+ * Derived from the title rather than random, so the same role added on two
+ * devices keys to the same stored roadmap instead of silently forking.
+ */
+export function makeRoleId(title: string): string {
+  return `role_${title.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "")}`;
+}
+
+/**
+ * Applies the role migration to a user object read from local cache.
+ * The cached copy predates multi-role support and has no targetRoles array, so
+ * loading it raw left every consumer calling .find on undefined.
+ */
+function hydrateUser(raw: any): User {
+  return { ...raw, ...normalizeRoles(raw) };
+}
+
 function mapServerUser(raw: any): User {
   const toMs = (v: any): number | undefined => {
     if (!v) return undefined;
@@ -130,7 +193,7 @@ function mapServerUser(raw: any): User {
     name:  raw.name ?? "",
     email: raw.email ?? "",
     phone: raw.phone,
-    targetRole:       raw.targetRole ?? "",
+    ...normalizeRoles(raw),
     experienceLevel:  raw.experienceLevel ?? "",
     background:       raw.background,
     onboardingComplete: raw.onboardingComplete ?? false,
@@ -182,7 +245,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             // Server unreachable — fall back to the last cached profile so the
             // app stays usable offline. A stale cache beats a blank screen.
             const rawUser = await AsyncStorage.getItem(STORE.USER);
-            if (rawUser) setUser(JSON.parse(rawUser));
+            if (rawUser) setUser(hydrateUser(JSON.parse(rawUser)));
           }
         }
         const [pendingEmail, pendingId] = await Promise.all([
@@ -488,6 +551,81 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setRiskLevel(null);
   }, []);
 
+  // ─── Target roles ────────────────────────────────────────────────────────────
+  // Each role owns its roadmap, CV analysis, job matches and interviews, so
+  // switching is a change of context rather than a filter over shared data.
+
+  const setActiveRole = useCallback(async (roleId: string) => {
+    if (!user) return;
+    const role = (user.targetRoles ?? []).find((r) => r.id === roleId);
+    if (!role) return;
+    // targetRole is kept in step so every existing screen, and the server's
+    // single-role field, follow the switch without knowing about the array.
+    await persistUser({ ...user, activeRoleId: role.id, targetRole: role.title });
+    try {
+      await AuthApiService.updateProfile({ targetRole: role.title, activeRoleId: role.id });
+    } catch (e) {
+      console.warn("[AuthContext] Failed to sync active role:", e);
+    }
+  }, [user]);
+
+  const addTargetRole = useCallback(async (title: string) => {
+    if (!user) return;
+    const clean = title.trim();
+    if (!clean) return;
+    const id = makeRoleId(clean);
+    // Adding a role the user already has should switch to it, not duplicate it.
+    const existing = user.targetRoles ?? [];
+    if (existing.some((r) => r.id === id)) {
+      await setActiveRole(id);
+      return;
+    }
+    const role: TargetRole = { id, title: clean, createdAt: new Date().toISOString() };
+    await persistUser({
+      ...user,
+      targetRoles: [...existing, role],
+      activeRoleId: id,
+      targetRole: clean,
+    });
+    try {
+      await AuthApiService.updateProfile({
+        targetRole: clean,
+        targetRoles: [...existing, role],
+        activeRoleId: id,
+      });
+    } catch (e) {
+      console.warn("[AuthContext] Failed to sync new role:", e);
+    }
+  }, [user, setActiveRole]);
+
+  const removeTargetRole = useCallback(async (roleId: string) => {
+    if (!user) return;
+    // Refuse to remove the last role: with none, the app has no context to
+    // show and every role-scoped screen would render empty.
+    if ((user.targetRoles ?? []).length <= 1) return;
+    const remaining = (user.targetRoles ?? []).filter((r) => r.id !== roleId);
+    // Sync happens below via persistUser's server call path; push the pruned
+    // list explicitly so a removed role does not reappear on the next login.
+    const nextActive = user.activeRoleId === roleId
+      ? remaining[0]
+      : (user.targetRoles ?? []).find((r) => r.id === user.activeRoleId) ?? remaining[0];
+    await persistUser({
+      ...user,
+      targetRoles: remaining,
+      activeRoleId: nextActive.id,
+      targetRole: nextActive.title,
+    });
+    try {
+      await AuthApiService.updateProfile({
+        targetRole: nextActive.title,
+        targetRoles: remaining,
+        activeRoleId: nextActive.id,
+      });
+    } catch (e) {
+      console.warn("[AuthContext] Failed to sync role removal:", e);
+    }
+  }, [user]);
+
   // ─────────────────────────────────────────────────────────────────────────────
   // updateUser / completeOnboarding
   // ─────────────────────────────────────────────────────────────────────────────
@@ -511,9 +649,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     background: string, experienceLevel: string, targetRole: string,
   ) => {
     if (!user) return;
-    await persistUser({ ...user, background, experienceLevel, targetRole, onboardingComplete: true });
+    const first: TargetRole = { id: makeRoleId(targetRole), title: targetRole, createdAt: new Date().toISOString() };
+    await persistUser({
+      ...user,
+      background,
+      experienceLevel,
+      targetRole,
+      targetRoles: [first],
+      activeRoleId: first.id,
+      onboardingComplete: true,
+    });
     try {
-      await AuthApiService.updateProfile({ background, experienceLevel, targetRole, onboardingComplete: true });
+      await AuthApiService.updateProfile({
+        background, experienceLevel, targetRole, onboardingComplete: true,
+        targetRoles: [first], activeRoleId: first.id,
+      });
     } catch (e) {
       console.warn("[AuthContext] Failed to sync onboarding to server:", e);
     }
@@ -564,7 +714,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.warn("[AuthContext] loadUserFromServer failed:", e);
       const raw = await AsyncStorage.getItem(STORE.USER);
-      if (raw) setUser(JSON.parse(raw));
+      if (raw) setUser(hydrateUser(JSON.parse(raw)));
     }
   }, []);
 
@@ -576,6 +726,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       pending2FAUserId, biometricAvailable, biometricType,
       signIn, signUp, signOut, updateUser,
       completeOnboarding, resendVerification, confirmEmailVerified, beginEmailVerification,
+      activeRole: user?.targetRoles?.find((r) => r.id === user.activeRoleId) ?? null,
+      setActiveRole, addTargetRole, removeTargetRole,
       verify2FA, loginWithBiometric, enrollBiometric, disableBiometric,
       reauthenticate, setSecurityQuestions, verifySecurityAnswers, getSecurityQuestions,
       signInWithSocial, loadUserFromServer,

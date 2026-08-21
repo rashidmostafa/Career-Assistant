@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { detectPlatform, deriveLabel, isValidUrl, normalizeUrl } from "@/constants/portfolioPlatforms";
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useAuth } from "./AuthContext";
 
@@ -18,11 +19,22 @@ export interface CodeforcesMetrics {
   rank: string;
 }
 
+/** A link the user attached — their site, profiles, anything they want shown. */
+export interface PortfolioLink {
+  id: string;
+  url: string;
+  /** Account name or domain. Shown on the card instead of the raw URL. */
+  label: string;
+  platformId: string;
+  addedAt: string;
+}
+
 export interface Portfolio {
   id: string;
   userId: string;
   github: GithubMetrics | null;
   codeforces: CodeforcesMetrics | null;
+  links: PortfolioLink[];
   updatedAt: string;
 }
 
@@ -31,6 +43,8 @@ interface PortfolioContextType {
   isSyncing: boolean;
   syncGithub: (username: string) => Promise<void>;
   syncCodeforces: (handle: string) => Promise<void>;
+  addLink: (url: string, label?: string) => Promise<void>;
+  removeLink: (id: string) => Promise<void>;
   clearPortfolio: () => Promise<void>;
 }
 
@@ -64,6 +78,11 @@ function normalizeCodeforcesMetrics(value: unknown): CodeforcesMetrics | null {
   };
 }
 
+function isLink(value: unknown): value is PortfolioLink {
+  const l = value as Partial<PortfolioLink>;
+  return !!l && typeof l.id === "string" && typeof l.url === "string" && typeof l.label === "string";
+}
+
 function normalizePortfolio(value: unknown): Portfolio | null {
   if (!value || typeof value !== "object") return null;
 
@@ -77,6 +96,9 @@ function normalizePortfolio(value: unknown): Portfolio | null {
     userId: portfolio.userId,
     github: normalizeGithubMetrics(portfolio.github),
     codeforces: normalizeCodeforcesMetrics(portfolio.codeforces),
+    // Portfolios saved before links existed have no array; default rather than
+    // discarding the record, or an existing user loses their synced metrics.
+    links: Array.isArray(portfolio.links) ? portfolio.links.filter(isLink) : [],
     updatedAt: typeof portfolio.updatedAt === "string" ? portfolio.updatedAt : new Date().toISOString(),
   };
 }
@@ -139,11 +161,12 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
         commits: Math.floor(Math.random() * 500) + 100,
         topLanguages,
       };
-      const base = portfolio || {
+      const base: Portfolio = portfolio || {
         id: Date.now().toString(),
         userId: user!.id,
         github: null,
         codeforces: null,
+        links: [],
         updatedAt: new Date().toISOString(),
       };
       await save({ ...base, github, updatedAt: new Date().toISOString() });
@@ -180,17 +203,65 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
         solved,
         rank: info.rank || "unrated",
       };
-      const base = portfolio || {
+      const base: Portfolio = portfolio || {
         id: Date.now().toString(),
         userId: user!.id,
         github: null,
         codeforces: null,
+        links: [],
         updatedAt: new Date().toISOString(),
       };
       await save({ ...base, codeforces: cf, updatedAt: new Date().toISOString() });
     } finally {
       setIsSyncing(false);
     }
+  };
+
+  const addLink = async (rawUrl: string, label?: string) => {
+    if (!user || !isValidUrl(rawUrl)) return;
+    const url = normalizeUrl(rawUrl);
+    const platform = detectPlatform(url);
+
+    const base: Portfolio = portfolio ?? {
+      id: `portfolio_${user.id}`,
+      userId: user.id,
+      github: null,
+      codeforces: null,
+      links: [],
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Same destination twice adds nothing; keep the first.
+    if (base.links.some((l) => l.url === url)) return;
+
+    const link: PortfolioLink = {
+      id: `link_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      url,
+      label: label?.trim() || deriveLabel(url, platform),
+      platformId: platform.id,
+      addedAt: new Date().toISOString(),
+    };
+
+    await save({ ...base, links: [...base.links, link], updatedAt: new Date().toISOString() });
+
+    // GitHub and Codeforces expose public stats, so a link to either can carry
+    // live numbers rather than sitting there as a bare shortcut. Best-effort:
+    // a rate-limited or private profile must not block adding the link.
+    try {
+      if (platform.id === "github") await syncGithub(link.label);
+      else if (platform.id === "codeforces") await syncCodeforces(link.label);
+    } catch {
+      /* card still works without metrics */
+    }
+  };
+
+  const removeLink = async (id: string) => {
+    if (!portfolio) return;
+    await save({
+      ...portfolio,
+      links: portfolio.links.filter((l) => l.id !== id),
+      updatedAt: new Date().toISOString(),
+    });
   };
 
   const clearPortfolio = async () => {
@@ -201,7 +272,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <PortfolioContext.Provider
-      value={{ portfolio, isSyncing, syncGithub, syncCodeforces, clearPortfolio }}
+      value={{ portfolio, isSyncing, syncGithub, syncCodeforces, addLink, removeLink, clearPortfolio }}
     >
       {children}
     </PortfolioContext.Provider>

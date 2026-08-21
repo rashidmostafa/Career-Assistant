@@ -24,7 +24,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   LayoutAnimation,
   Platform,
   ScrollView,
@@ -40,6 +39,8 @@ import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { extractPdfTextFromBase64, diagnosePdf } from "@/utils/pdfExtract";
 import { toByteArray } from "base64-js";
+import { showAlert } from "@/utils/alert";
+import { RoleSwitcher } from "@/components/RoleSwitcher";
 
 type CVFormat = "Harvard" | "MIT" | "Corporate";
 const CV_FORMATS: { id: CVFormat; label: string; icon: React.ElementType; description: string; color: string }[] = [
@@ -138,7 +139,7 @@ export default function CVScreen() {
   };
 
   const handleClear = () => {
-    Alert.alert("Clear CV", "Remove current CV analysis?", [
+    showAlert("Clear CV", "Remove current CV analysis?", [
       { text: "Cancel", style: "cancel" },
       { text: "Clear", style: "destructive", onPress: () => { clearCV(); setPdfFileName(null); setPdfError(null); setActiveTab("input"); } },
     ]);
@@ -152,7 +153,7 @@ export default function CVScreen() {
       setIsCopied(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setTimeout(() => setIsCopied(false), 3000);
-    } catch { Alert.alert("Copy Failed", "Could not copy to clipboard."); }
+    } catch { showAlert("Copy Failed", "Could not copy to clipboard."); }
   };
 
   const handleExportPDF = async () => {
@@ -173,7 +174,7 @@ export default function CVScreen() {
         else await Print.printAsync({ html });
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch { Alert.alert("Export Failed", "Could not generate PDF."); }
+    } catch { showAlert("Export Failed", "Could not generate PDF."); }
     finally { setIsExporting(false); }
   };
 
@@ -201,6 +202,7 @@ export default function CVScreen() {
           ))}
         </View>
       )}
+      <RoleSwitcher accent={colors.cv ?? colors.primary} />
 
       <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: bottomPad + 100 }} showsVerticalScrollIndicator={false}>
 

@@ -12,7 +12,6 @@ import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   ScrollView,
   Share,
@@ -29,6 +28,7 @@ import { OtpInput } from "@/components/auth/OtpInput";
 import { RiskScoringService } from "@/services/riskScoring";
 import { SessionManager } from "@/services/sessionManager";
 import type { RiskLevel } from "@/services/riskScoring";
+import { showAlert } from "@/utils/alert";
 
 const RISK_COLORS: Record<RiskLevel, string> = {
   LOW: "#10b981", MEDIUM: "#f59e0b", HIGH: "#ef4444", CRITICAL: "#7c3aed",
@@ -80,7 +80,7 @@ export default function SecurityScreen() {
       await updateUser({ twoFactorEnabled: true, twoFactorMethod: method, backupCodesRemaining: setup.backupCodes.length });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     } catch (e: any) {
-      Alert.alert("Error", e.message);
+      showAlert("Error", e.message);
     } finally {
       setLoading(null);
     }
@@ -91,7 +91,7 @@ export default function SecurityScreen() {
   // it off. For email we have to actually send a fresh code first (there's
   // no rotating code sitting on-device the way TOTP has).
   const handleDisable2FA = useCallback(() => {
-    Alert.alert(
+    showAlert(
       "Disable 2FA",
       user?.twoFactorMethod === "totp"
         ? "Removing 2FA will make your account less secure. You'll need to enter your current authenticator code to confirm."
@@ -108,7 +108,7 @@ export default function SecurityScreen() {
                 const { AuthApiService } = await import("@/services/authApiService");
                 await AuthApiService.resend2FA({ userId: user!.id, method: user!.twoFactorMethod as string });
               } catch (e: any) {
-                Alert.alert("Error", e.message);
+                showAlert("Error", e.message);
                 setLoading(null);
                 return;
               }
@@ -132,7 +132,7 @@ export default function SecurityScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     } catch (e: any) {
       setDisableError(true);
-      Alert.alert("Incorrect code", e.message ?? "That code didn't match. Please try again.");
+      showAlert("Incorrect code", e.message ?? "That code didn't match. Please try again.");
     } finally {
       setLoading(null);
     }
@@ -148,7 +148,7 @@ export default function SecurityScreen() {
       setLoading("bio");
       const ok = await enrollBiometric();
       setLoading(null);
-      if (!ok) Alert.alert("Biometric Setup", "Biometric enrollment failed. Please try again.");
+      if (!ok) showAlert("Biometric Setup", "Biometric enrollment failed. Please try again.");
       else Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     }
   }, [user, enrollBiometric, disableBiometric]);
@@ -160,7 +160,7 @@ export default function SecurityScreen() {
       await grantConsent();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     } catch (e: any) {
-      Alert.alert("Error", e.message);
+      showAlert("Error", e.message);
     } finally {
       setLoading(null);
     }
@@ -174,7 +174,7 @@ export default function SecurityScreen() {
       const json = JSON.stringify(data, null, 2);
       await Share.share({ message: json, title: "Career Assistant — Data Export" });
     } catch (e: any) {
-      Alert.alert("Export Failed", e.message);
+      showAlert("Export Failed", e.message);
     } finally {
       setLoading(null);
     }
@@ -182,7 +182,7 @@ export default function SecurityScreen() {
 
   // ── Account deletion ──────────────────────────────────────────────────────────
   const handleRequestDeletion = useCallback(() => {
-    Alert.alert(
+    showAlert(
       "Delete Account",
       "Your account and all data will be permanently deleted after a 30-day grace period. You can cancel anytime during this period.",
       [
@@ -192,7 +192,7 @@ export default function SecurityScreen() {
           style: "destructive",
           onPress: async () => {
             await requestAccountDeletion();
-            Alert.alert("Deletion Scheduled", "Your account is scheduled for deletion in 30 days. You can cancel from this screen.");
+            showAlert("Deletion Scheduled", "Your account is scheduled for deletion in 30 days. You can cancel from this screen.");
           },
         },
       ]
@@ -200,7 +200,7 @@ export default function SecurityScreen() {
   }, [requestAccountDeletion]);
 
   const handleCancelDeletion = useCallback(() => {
-    Alert.alert("Cancel Deletion", "This will cancel the scheduled account deletion.", [
+    showAlert("Cancel Deletion", "This will cancel the scheduled account deletion.", [
       { text: "Dismiss", style: "cancel" },
       { text: "Cancel Deletion", onPress: cancelAccountDeletion },
     ]);

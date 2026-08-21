@@ -12,7 +12,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RefreshCw, Map, List, GitBranch, Settings2, Trash2, Zap } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
-import { useRoadmap } from "@/context/RoadmapContext";
+import { useRoadmap, remainingDays } from "@/context/RoadmapContext";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { MacroProgressHeader } from "@/components/roadmap/MacroProgressHeader";
@@ -23,6 +23,7 @@ import { SkillDependencyGraph } from "@/components/roadmap/SkillDependencyGraph"
 import { CelebrationOverlay } from "@/components/roadmap/CelebrationOverlay";
 import { AccessibilityControls } from "@/components/roadmap/AccessibilityControls";
 import type { EmergencyStrategy } from "@/context/RoadmapContext";
+import { RoleSwitcher } from "@/components/RoleSwitcher";
 
 // ─── Tab definitions ───────────────────────────────────────────────────────────
 type TabId = "list" | "calendar" | "graph" | "settings";
@@ -58,24 +59,47 @@ function EmptyState({ onGenerate, isGenerating, colors }: { onGenerate: () => vo
         A dynamic guide that adapts to your pace — not a rigid schedule you must follow.
       </Text>
 
-      <View style={[styles.levelPreview, { borderColor: colors.border }]}>
-        {["🌱 Beginner", "⚡ Intermediate", "🔥 Advanced"].map((l, i) => (
-          <Text key={i} style={[styles.levelLabel, { color: colors.foreground }]}>{l}</Text>
+      {/* A miniature of the real thing. Showing the gated tree communicates what
+          a roadmap is in one glance — a feature list never did, and listing
+          things like "WCAG 2.1 AA" told the user nothing they wanted to know. */}
+      <View style={[styles.preview, { borderColor: colors.border, backgroundColor: colors.card }]}>
+        {[
+          { tier: "Start here", nodes: ["JavaScript", "Git"], locked: false },
+          { tier: "Unlocks next", nodes: ["Node.js"], locked: false },
+          { tier: "Gated", nodes: ["Express", "MongoDB"], locked: true },
+        ].map((row) => (
+          <View key={row.tier} style={styles.previewRow}>
+            <Text style={[styles.previewTier, { color: colors.mutedForeground }]}>{row.tier}</Text>
+            <View style={styles.previewNodes}>
+              {row.nodes.map((n) => (
+                <View
+                  key={n}
+                  style={[
+                    styles.previewNode,
+                    {
+                      borderColor: row.locked ? colors.border : (colors.roadmap ?? colors.primary),
+                      backgroundColor: row.locked ? colors.muted : (colors.roadmap ?? colors.primary) + "14",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.previewNodeText,
+                      { color: row.locked ? colors.mutedForeground : (colors.roadmap ?? colors.primary) },
+                    ]}
+                  >
+                    {row.locked ? "🔒 " : ""}{n}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
         ))}
       </View>
 
-      {[
-        "📊 Dynamic duration — weeks adapt to your learning pace",
-        "🎯 Job deadline tracking with 4 emergency strategies",
-        "🔗 Skill dependency visualisation with lock gates",
-        "🚀 Dual tracks: Job-Specific + Generic Career",
-        "🎉 Celebratory animations for milestones",
-        "♿ WCAG 2.1 AA accessible, reduced motion & high contrast",
-      ].map((f, i) => (
-        <View key={i} style={styles.featureRow}>
-          <Text style={[styles.featureText, { color: colors.mutedForeground }]}>{f}</Text>
-        </View>
-      ))}
+      <Text style={[styles.emptyNote, { color: colors.mutedForeground }]}>
+        Built from your CV and target role. Skills unlock as you finish what they depend on.
+      </Text>
 
       <TouchableOpacity
         style={[styles.generateBtn, { backgroundColor: colors.roadmap ?? colors.primary }]}
@@ -114,7 +138,10 @@ export default function RoadmapScreen() {
 
   const roadmapColor = colors.roadmap ?? colors.primary;
 
-  const [activeTab, setActiveTab]         = useState<TabId>("list");
+  // Opens on the skill tree rather than the timeline: the tree is the view that
+  // carries the structure — what is unlocked, what is gated behind what — while
+  // the timeline is where a single week's detail lives.
+  const [activeTab, setActiveTab]         = useState<TabId>("graph");
   const [selectedWeekId, setSelectedWeekId] = useState<string | null>(null);
   const [refreshing, setRefreshing]       = useState(false);
   const [celebration, setCelebration]     = useState<{
@@ -214,7 +241,7 @@ export default function RoadmapScreen() {
           </View>
 
           {hasRoadmap && (
-            <View style={styles.headerActions}>
+          <View style={styles.headerActions}>
               <TouchableOpacity
                 style={[styles.iconBtn, { borderColor: colors.border }]}
                 onPress={handleRefresh}
@@ -238,6 +265,9 @@ export default function RoadmapScreen() {
             </View>
           )}
         </View>
+
+        {/* Which role this roadmap belongs to — each has its own tree. */}
+        <RoleSwitcher accent={colors.roadmap ?? colors.primary} />
 
         {/* View tabs */}
         {hasRoadmap && (
@@ -333,6 +363,7 @@ export default function RoadmapScreen() {
               <View>
                 {jobDeadlines.map((dl) => (
                   <RiskBanner
+                    daysOfWorkLeft={remainingDays(weeks)}
                     key={dl.jobId}
                     deadline={dl}
                     onApplyStrategy={(sid: EmergencyStrategy["id"]) => applyEmergencyStrategy(dl.jobId, sid)}
@@ -499,6 +530,13 @@ export default function RoadmapScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
+  preview: { width: "100%", maxWidth: 340, borderWidth: 1, borderRadius: 18, padding: 16, gap: 14, marginTop: 24 },
+  previewRow: { gap: 7 },
+  previewTier: { fontFamily: "Inter_600SemiBold", fontSize: 12.5, letterSpacing: 0.7, textTransform: "uppercase" },
+  previewNodes: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  previewNode: { paddingHorizontal: 11, paddingVertical: 7, borderRadius: 10, borderWidth: 1.5 },
+  previewNodeText: { fontFamily: "Inter_600SemiBold", fontSize: 12.5 },
+  emptyNote: { fontFamily: "Inter_400Regular", fontSize: 13.5, lineHeight: 20, textAlign: "center", maxWidth: 320, marginTop: 18 },
   root: { flex: 1 },
 
   screenHeader: { borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 20, paddingBottom: 0 },
@@ -518,10 +556,6 @@ const styles = StyleSheet.create({
   emptyEmoji: { fontSize: 70, marginBottom: 18 },
   emptyTitle: { fontFamily: "Inter_700Bold", fontSize: 26, textAlign: "center", letterSpacing: -0.6, marginBottom: 10 },
   emptySub: { fontFamily: "Inter_500Medium", fontSize: 15, textAlign: "center", lineHeight: 23, marginBottom: 20 },
-  levelPreview: { flexDirection: "row", alignItems: "center", borderRadius: 14, borderWidth: 1, paddingHorizontal: 18, paddingVertical: 12, marginBottom: 18, gap: 14 },
-  levelLabel: { fontFamily: "Inter_700Bold", fontSize: 13 },
-  featureRow: { alignSelf: "stretch", paddingLeft: 8, marginBottom: 7 },
-  featureText: { fontFamily: "Inter_500Medium", fontSize: 14, lineHeight: 21 },
   generateBtn: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 18, paddingHorizontal: 36, borderRadius: 20, marginTop: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 6 },
   generateBtnText: { color: "#fff", fontFamily: "Inter_700Bold", fontSize: 17 },
 

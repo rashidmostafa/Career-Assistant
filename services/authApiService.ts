@@ -312,6 +312,8 @@ export const AuthApiService = {
     name: string;
     phone: string;
     targetRole: string;
+    targetRoles: { id: string; title: string; createdAt: string }[];
+    activeRoleId: string;
     experienceLevel: string;
     background: string;
     photoUri: string;

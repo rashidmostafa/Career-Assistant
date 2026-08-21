@@ -18,6 +18,12 @@ export interface Skill {
   name: string;
   status: SkillStatus;
   prerequisites: string[];
+  /**
+   * Days this skill is expected to take. Skills are not equal in size — a CSS
+   * refresher is not a fortnight of distributed systems — so the roadmap
+   * estimates each one instead of forcing everything into a uniform week.
+   */
+  estimatedDays: number;
   xpPoints: number;
   inCareerTrack: boolean;
 }
@@ -140,11 +146,13 @@ const EMERGENCY_STRATEGIES: EmergencyStrategy[] = [
 ];
 
 // ─── Risk calculation ─────────────────────────────────────────────────────────
-function calcRisk(weeksToDeadline: number, totalNeeded: number, done: number): RiskLevel {
-  if (weeksToDeadline <= 0) return "EXPIRED";
-  const left = totalNeeded - done;
-  if (left <= 0) return "SAFE";
-  const ratio = weeksToDeadline / left;
+function calcRisk(daysToDeadline: number, daysOfWorkLeft: number): RiskLevel {
+  if (daysToDeadline <= 0) return "EXPIRED";
+  if (daysOfWorkLeft <= 0) return "SAFE";
+  // Comparing estimated study days against calendar days left answers the real
+  // question — is this reachable? Counting whole weeks against a week count
+  // ignored that skills differ wildly in size.
+  const ratio = daysToDeadline / daysOfWorkLeft;
   if (ratio > 1.5) return "SAFE";
   if (ratio > 1.1) return "WATCH";
   if (ratio > 0.8) return "ALERT";
@@ -207,23 +215,80 @@ function getTemplate(role: string): WeekTemplate[] {
   return TEMPLATES[role.toLowerCase()] ?? DEFAULT_TEMPLATE;
 }
 
-function buildSkills(topic: string, weekId: string, prevIds: string[]): Skill[] {
+/** Baseline effort by difficulty. Advanced material genuinely takes longer. */
+const DAYS_BY_LEVEL: Record<WeekTemplate["level"], number> = {
+  Beginner: 3,
+  Intermediate: 5,
+  Advanced: 8,
+};
+
+function buildSkills(
+  topic: string,
+  weekId: string,
+  prevIds: string[],
+  level: WeekTemplate["level"] = "Intermediate",
+): Skill[] {
   const names = topic.split(/\s*[&+]\s*|\s+and\s+/i).flatMap((s) => s.trim().split(/\s*,\s*/)).filter(Boolean).slice(0, 3);
   return names.map((name, i) => ({
     id: `${weekId}_s${i}`,
     name: name.trim(),
     status: "Pending" as SkillStatus,
     prerequisites: i > 0 ? prevIds.slice(0, 1) : [],
+    // Later skills in a topic build on the earlier ones, so they run slightly
+    // longer; the first is the entry point.
+    estimatedDays: DAYS_BY_LEVEL[level] + i,
     xpPoints: 0,
     inCareerTrack: false,
   }));
+}
+
+/**
+ * Backfills estimatedDays on roadmaps saved before skills carried durations.
+ * Without this an existing roadmap reports every stage as ~0 days, and the
+ * deadline feasibility check silently concludes there is no work left.
+ */
+function withEstimates(weeks: RoadmapWeek[]): RoadmapWeek[] {
+  return weeks.map((w) => ({
+    ...w,
+    skills: w.skills.map((s, i) =>
+      s.estimatedDays
+        ? s
+        : { ...s, estimatedDays: (DAYS_BY_LEVEL[w.level] ?? 5) + i },
+    ),
+  }));
+}
+
+/** Days a week of work actually represents — the sum of its skills. */
+export function weekDays(week: RoadmapWeek): number {
+  return week.skills.reduce((sum, s) => sum + (s.estimatedDays || 0), 0);
+}
+
+/** Estimated days of study still outstanding across the roadmap. */
+export function remainingDays(weeks: RoadmapWeek[]): number {
+  return weeks
+    .filter((w) => !w.isCompleted)
+    .reduce(
+      (sum, w) =>
+        sum + w.skills.filter((s) => s.status !== "Mastered" && s.status !== "Expert")
+          .reduce((a, s) => a + (s.estimatedDays || 0), 0),
+      0,
+    );
+}
+
+/**
+ * Days until a deadline, computed from the date every time it is read.
+ * It was previously stored on the deadline at creation and never recomputed,
+ * so the countdown sat frozen at whatever it was when the roadmap was built.
+ */
+export function daysUntil(deadlineDate: string): number {
+  return Math.ceil((new Date(deadlineDate).getTime() - Date.now()) / 86_400_000);
 }
 
 function buildWeeks(templates: WeekTemplate[], track: "job" | "career", startWeek = 1): RoadmapWeek[] {
   let prevIds: string[] = [];
   return templates.map((t, i) => {
     const id = `w${startWeek + i}_${track}_${Date.now() + i}`;
-    const skills = buildSkills(t.topic, id, prevIds);
+    const skills = buildSkills(t.topic, id, prevIds, t.level);
     prevIds = skills.map((s) => s.id);
     return {
       id,
@@ -247,6 +312,9 @@ const RoadmapContext = createContext<RoadmapState | null>(null);
 
 export function RoadmapProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
+  // Every stored key is scoped to the active role: two target roles mean two
+  // independent roadmaps, and without this the second would overwrite the first.
+  const roleKey = user?.activeRoleId || "default";
   const [weeks, setWeeks] = useState<RoadmapWeek[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [targetRole, setTargetRole] = useState("");
@@ -263,10 +331,10 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
     async (w: RoadmapWeek[], c: Skill[], d: JobDeadline[], r: string) => {
       if (!user) return;
       await Promise.all([
-        AsyncStorage.setItem(`rm_weeks_${user.id}`, JSON.stringify(w)),
-        AsyncStorage.setItem(`rm_career_${user.id}`, JSON.stringify(c)),
-        AsyncStorage.setItem(`rm_dead_${user.id}`, JSON.stringify(d)),
-        AsyncStorage.setItem(`rm_role_${user.id}`, r),
+        AsyncStorage.setItem(`rm_weeks_${user.id}_${roleKey}`, JSON.stringify(w)),
+        AsyncStorage.setItem(`rm_career_${user.id}_${roleKey}`, JSON.stringify(c)),
+        AsyncStorage.setItem(`rm_dead_${user.id}_${roleKey}`, JSON.stringify(d)),
+        AsyncStorage.setItem(`rm_role_${user.id}_${roleKey}`, r),
       ]);
     },
     [user]
@@ -275,7 +343,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
   const saveSettings = useCallback(
     async (vm: "calendar" | "list", rm: boolean, hc: boolean) => {
       if (!user) return;
-      await AsyncStorage.setItem(`rm_settings_${user.id}`, JSON.stringify({ vm, rm, hc }));
+      await AsyncStorage.setItem(`rm_settings_${user.id}_${roleKey}`, JSON.stringify({ vm, rm, hc }));
     },
     [user]
   );
@@ -286,18 +354,22 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         const [wRaw, cRaw, dRaw, rRaw, sRaw] = await Promise.all([
-          AsyncStorage.getItem(`rm_weeks_${user.id}`),
-          AsyncStorage.getItem(`rm_career_${user.id}`),
-          AsyncStorage.getItem(`rm_dead_${user.id}`),
-          AsyncStorage.getItem(`rm_role_${user.id}`),
-          AsyncStorage.getItem(`rm_settings_${user.id}`),
+          AsyncStorage.getItem(`rm_weeks_${user.id}_${roleKey}`),
+          AsyncStorage.getItem(`rm_career_${user.id}_${roleKey}`),
+          AsyncStorage.getItem(`rm_dead_${user.id}_${roleKey}`),
+          AsyncStorage.getItem(`rm_role_${user.id}_${roleKey}`),
+          AsyncStorage.getItem(`rm_settings_${user.id}_${roleKey}`),
           // also check legacy key
           AsyncStorage.getItem(`roadmap_${user.id}`),
         ]);
-        if (wRaw) setWeeks(JSON.parse(wRaw));
-        if (cRaw) setCareerTrackSkills(JSON.parse(cRaw));
-        if (dRaw) setJobDeadlines(JSON.parse(dRaw));
-        if (rRaw) setTargetRole(rRaw);
+        // Assign unconditionally, including the empty case. Switching to a
+        // role that has no roadmap yet must clear the previous role's data —
+        // otherwise the new role appears to already have a roadmap, and the
+        // next save would write the old weeks under the new role's key.
+        setWeeks(wRaw ? withEstimates(JSON.parse(wRaw)) : []);
+        setCareerTrackSkills(cRaw ? JSON.parse(cRaw) : []);
+        setJobDeadlines(dRaw ? JSON.parse(dRaw) : []);
+        setTargetRole(rRaw ?? "");
         if (sRaw) {
           const s = JSON.parse(sRaw);
           if (s.vm) setViewModeState(s.vm);
@@ -306,7 +378,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (_) {}
     })();
-  }, [user]);
+  }, [user, roleKey]);
 
   // ── Computed ─────────────────────────────────────────────────────────────────
   const completedWeeks = weeks.filter((w) => w.isCompleted).length;
@@ -337,7 +409,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
           level: "Advanced",
           tasks: ["Study system design", "Build a complex feature", "Review senior-level code"],
           resources: [{ title: "System Design Primer", url: "https://github.com/donnemartin/system-design-primer", type: "article" }],
-          skills: buildSkills("Advanced Specialization", id, last?.skills.map((s) => s.id) ?? []),
+          skills: buildSkills("Advanced Specialization", id, last?.skills.map((s) => s.id) ?? [], "Advanced"),
           isCompleted: false,
           isUnlocked: last?.isCompleted ?? false,
           track: "career",
@@ -373,12 +445,11 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
 
         const newDeadlines = [...jobDeadlines];
         if (jobDeadline) {
-          const daysLeft = Math.floor((new Date(jobDeadline.deadlineDate).getTime() - Date.now()) / 86_400_000);
-          const weeksLeft = Math.round(daysLeft / 7);
+          const daysLeft = daysUntil(jobDeadline.deadlineDate);
           const dl: JobDeadline = {
             ...jobDeadline,
-            weeksToDeadline: weeksLeft,
-            riskLevel: calcRisk(weeksLeft, allWeeks.length, 0),
+            weeksToDeadline: Math.round(daysLeft / 7),
+            riskLevel: calcRisk(daysLeft, remainingDays(allWeeks)),
             emergencyStrategies: EMERGENCY_STRATEGIES,
             isExpired: daysLeft <= 0,
             alternativeJobs: [],
@@ -453,10 +524,15 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Refresh deadlines risk level
-      const newDeadlines = jobDeadlines.map((d) => ({
-        ...d,
-        riskLevel: calcRisk(d.weeksToDeadline, withDynamic.length, withDynamic.filter((w) => w.isCompleted).length),
-      }));
+      const newDeadlines = jobDeadlines.map((d) => {
+        const daysLeft = daysUntil(d.deadlineDate);
+        return {
+          ...d,
+          weeksToDeadline: Math.round(daysLeft / 7),
+          isExpired: daysLeft <= 0,
+          riskLevel: calcRisk(daysLeft, remainingDays(withDynamic)),
+        };
+      });
 
       setWeeks(withDynamic);
       setCareerTrackSkills(newCareer);
@@ -519,13 +595,13 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
     if (!user) return;
     setWeeks([]); setCareerTrackSkills([]); setJobDeadlines([]); setTargetRole("");
     await Promise.all([
-      AsyncStorage.removeItem(`rm_weeks_${user.id}`),
-      AsyncStorage.removeItem(`rm_career_${user.id}`),
-      AsyncStorage.removeItem(`rm_dead_${user.id}`),
-      AsyncStorage.removeItem(`rm_role_${user.id}`),
+      AsyncStorage.removeItem(`rm_weeks_${user.id}_${roleKey}`),
+      AsyncStorage.removeItem(`rm_career_${user.id}_${roleKey}`),
+      AsyncStorage.removeItem(`rm_dead_${user.id}_${roleKey}`),
+      AsyncStorage.removeItem(`rm_role_${user.id}_${roleKey}`),
       AsyncStorage.removeItem(`roadmap_${user.id}`), // legacy
     ]);
-  }, [user]);
+  }, [user, roleKey]);
 
   // ── Settings ──────────────────────────────────────────────────────────────────
   const setViewMode = useCallback((m: "calendar" | "list") => { setViewModeState(m); saveSettings(m, reducedMotion, highContrast); }, [reducedMotion, highContrast, saveSettings]);

@@ -33,9 +33,9 @@ interface Props {
   highContrast?: boolean;
 }
 
-const LEVEL_SIZES: Record<ProgressLevel, number> = { macro: 100, micro: 64, individual: 40 };
+const LEVEL_SIZES: Record<ProgressLevel, number> = { macro: 108, micro: 72, individual: 44 };
 const LEVEL_STROKE: Record<ProgressLevel, number> = { macro: 10, micro: 7, individual: 5 };
-const LEVEL_FONT: Record<ProgressLevel, number> = { macro: 20, micro: 14, individual: 10 };
+const LEVEL_FONT: Record<ProgressLevel, number> = { macro: 24, micro: 17, individual: 12 };
 
 export function CircularProgress({ progress, size: sizeProp, strokeWidth: swProp, level, label, sublabel, status, animate = true, highContrast = false }: Props) {
   const colors = useColors();
@@ -71,12 +71,13 @@ export function CircularProgress({ progress, size: sizeProp, strokeWidth: swProp
 
   return (
     <View
-      style={[styles.wrap, { width: size, height: size }]}
+      style={[styles.wrap, { width: size }]}
       accessible
       accessibilityRole="progressbar"
       accessibilityValue={{ min: 0, max: 100, now: progress }}
       accessibilityLabel={`${label ?? "Progress"}: ${progress}%`}
     >
+      <View style={{ width: size, height: size }}>
       <Svg width={size} height={size} style={{ transform: [{ rotate: "-90deg" }] }}>
         <G>
           <Circle cx={size / 2} cy={size / 2} r={radius} stroke={highContrast ? "#ccc" : colors.border} strokeWidth={strokeWidth} fill="transparent" />
@@ -99,6 +100,7 @@ export function CircularProgress({ progress, size: sizeProp, strokeWidth: swProp
           </>
         )}
       </View>
+      </View>
       {sublabel && level !== "individual" && (
         <Text style={[styles.sublabel, { color: colors.mutedForeground }]} numberOfLines={1} allowFontScaling={false}>
           {sublabel}
@@ -109,10 +111,10 @@ export function CircularProgress({ progress, size: sizeProp, strokeWidth: swProp
 }
 
 const styles = StyleSheet.create({
-  wrap: { alignItems: "center", justifyContent: "center" },
-  inner: { position: "absolute", alignItems: "center", justifyContent: "center" },
+  wrap: { alignItems: "center", justifyContent: "flex-start" },
+  inner: { position: "absolute", top: 0, left: 0, alignItems: "center", justifyContent: "center" },
   score: { fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
-  label: { fontFamily: "Inter_500Medium", fontSize: 9, marginTop: 1, textAlign: "center" },
-  sublabel: { fontFamily: "Inter_500Medium", fontSize: 10, marginTop: 4, textAlign: "center" },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  label: { fontFamily: "Inter_500Medium", fontSize: 12.5, marginTop: 2, textAlign: "center" },
+  sublabel: { fontFamily: "Inter_500Medium", fontSize: 12, marginTop: 6, textAlign: "center" },
+  statusDot: { width: 10, height: 10, borderRadius: 5 },
 });
