@@ -1,4 +1,6 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+// Device storage that also syncs to the account, so this context's state
+// survives a reinstall and follows the user to a new phone. Same API.
+import AsyncStorage from "@/services/syncedStorage";
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useAuth } from "./AuthContext";
 import { chatJSON, isAIConfigured } from "@/services/aiClient";

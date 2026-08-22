@@ -8,6 +8,7 @@
  *  - Auth endpoints: 20 requests / hour
  *  - Recovery:  3 attempts / day
  *  - General:   100 requests / hour
+ *  - AI proxy:  60 requests / hour
  */
 const { rateLimit } = require("express-rate-limit");
 
@@ -61,6 +62,21 @@ const generalLimiter = rateLimit({
   skip: (req) => process.env.NODE_ENV === "test",
 });
 
+// AI proxy calls are far more expensive than a login, and they are also the
+// only endpoints a normal session hits repeatedly. Pooling them into
+// generalLimiter (100/hour, shared with every other /api route) meant a user
+// working through a CV analysis plus a roadmap regeneration could exhaust the
+// budget that /api/auth/refresh needs to keep them signed in. Separate bucket.
+const aiLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 60,
+  message: { message: "Too many AI requests. Please try again shortly." },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => rateLimitKey(req, "ai"),
+  skip: (req) => process.env.NODE_ENV === "test",
+});
+
 // IP blocking (in-memory; production: use Redis SET with TTL)
 const blockedIPs = new Set();
 const blockExpiry = new Map();
@@ -84,4 +100,4 @@ function ipBlockMiddleware(req, res, next) {
   next();
 }
 
-module.exports = { authLimiter, recoveryLimiter, generalLimiter, ipBlockMiddleware, blockIP };
+module.exports = { authLimiter, recoveryLimiter, generalLimiter, aiLimiter, ipBlockMiddleware, blockIP };

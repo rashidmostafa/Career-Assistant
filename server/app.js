@@ -30,6 +30,14 @@ require("dotenv").config();
  *   GET    /api/user/sessions         (authenticated)
  *   DELETE /api/user/sessions/:id     (authenticated)
  *   GET    /api/user/audit-log        (authenticated)
+ *   POST   /api/ai/chat               (authenticated)  general LLM proxy
+ *   POST   /api/ai/hawk/:task         (authenticated)  Hawk model proxy
+ *   GET    /api/ai/status             (authenticated)
+ *   GET    /api/data                  (authenticated)  sync manifest
+ *   POST   /api/data/bulk             (authenticated)
+ *   GET    /api/data/:namespace       (authenticated)
+ *   PUT    /api/data/:namespace       (authenticated)
+ *   DELETE /api/data/:namespace       (authenticated)
  *   GET    /health
  */
 const express    = require("express");
@@ -40,6 +48,9 @@ const { initPassport } = require("./config/passport");
 const { generalLimiter, ipBlockMiddleware } = require("./middleware/rateLimiter");
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
+const aiRoutes   = require("./routes/ai");
+const dataRoutes = require("./routes/data");
+const { startDeletionWorker } = require("./services/deletionWorker");
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -96,6 +107,8 @@ initPassport(app);
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
+app.use("/api/ai",   aiRoutes);
+app.use("/api/data", dataRoutes);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ message: "Not found." }));
@@ -110,9 +123,11 @@ app.use((err, _req, res, _next) => {
 if (require.main === module) {
   connectDB().then(() => {
     app.listen(PORT, () => {
-      console.log(`[Server] Career Assistant Auth API running on port ${PORT}`);
+      console.log(`[Server] Career Assistant API running on port ${PORT}`);
       console.log(`[Server] Environment: ${process.env.NODE_ENV ?? "development"}`);
     });
+    // Acts on the 30-day grace period set by POST /api/user/delete.
+    startDeletionWorker();
   });
 }
 

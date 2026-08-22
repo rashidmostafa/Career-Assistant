@@ -18,9 +18,7 @@
       },
       "env": {
         "NPM_FLAGS": "--legacy-peer-deps",
-        "EXPO_PUBLIC_API_URL": "https://career-assistant-api-pkc0.onrender.com",
-        "EXPO_PUBLIC_AI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "EXPO_PUBLIC_AI_MODEL": "gemini-3.6-flash"
+        "EXPO_PUBLIC_API_URL": "https://career-assistant-api-pkc0.onrender.com"
       }
     },
     "ios-simulator": {

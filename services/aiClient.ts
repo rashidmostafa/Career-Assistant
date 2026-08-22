@@ -1,86 +1,58 @@
 /**
- * aiClient — single entry point for the app's LLM calls.
+ * aiClient — single entry point for the app's general-purpose LLM calls.
  *
- * Every provider used here speaks the OpenAI chat-completions wire format, so
- * switching providers is a matter of changing the base URL and model rather
- * than the calling code. Configure via .env:
+ * These calls used to go straight from the phone to Gemini using
+ * EXPO_PUBLIC_OPENAI_API_KEY. Expo inlines every EXPO_PUBLIC_* variable into
+ * the JS bundle at build time, which meant the API key shipped inside the APK
+ * and could be recovered by anyone who unzipped it. The key now lives only in
+ * the backend's environment and the app calls `/api/ai/chat` instead.
  *
- *   OpenAI (default, paid)
- *     EXPO_PUBLIC_OPENAI_API_KEY=sk-...
+ * Three things came along with the move, all of which used to be impossible
+ * from the client: the provider and model can change without shipping a new
+ * build, requests are rate limited per account rather than per API key, and
+ * retry policy is applied server-side where it can be tuned.
  *
- *   Google Gemini (free tier, no card — key from aistudio.google.com/apikey)
- *     EXPO_PUBLIC_OPENAI_API_KEY=AIza...
- *     EXPO_PUBLIC_AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
- *     EXPO_PUBLIC_AI_MODEL=gemini-2.0-flash
- *
- *   Groq (free tier, no card — key from console.groq.com)
- *     EXPO_PUBLIC_OPENAI_API_KEY=gsk_...
- *     EXPO_PUBLIC_AI_BASE_URL=https://api.groq.com/openai/v1
- *     EXPO_PUBLIC_AI_MODEL=llama-3.3-70b-versatile
- *
- * When no key is set, chatJSON returns null and each caller keeps its existing
- * heuristic fallback, so the app stays fully functional without any provider.
+ * Configure on the SERVER (not here): AI_API_KEY, AI_BASE_URL, AI_MODEL.
+ * The only thing the app needs is EXPO_PUBLIC_API_URL.
  */
-const DEFAULT_BASE_URL = "https://api.openai.com/v1";
-const DEFAULT_MODEL = "gpt-4o-mini";
+import { apiFetch } from "./authApiService";
 
-export const AI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY ?? "";
+const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "";
 
-const BASE_URL = (process.env.EXPO_PUBLIC_AI_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/$/, "");
-const MODEL = process.env.EXPO_PUBLIC_AI_MODEL ?? DEFAULT_MODEL;
+// Generous by design: the request may wake a spun-down instance before the
+// model is even called. Still finite, because every caller has a deterministic
+// fallback that is better than an indefinitely blocked screen.
+const TIMEOUT_MS = Number(process.env.EXPO_PUBLIC_AI_TIMEOUT_MS ?? 45000);
 
-export const isAIConfigured = AI_API_KEY.length > 0;
+/**
+ * True when the app knows where its backend is. Whether a model is actually
+ * configured behind it is the server's business — a request made when none is
+ * returns null, which is the same thing callers already handle.
+ */
+export const isAIConfigured = API_URL.length > 0;
 
 /**
  * Sends a prompt and returns the parsed JSON object the model replied with.
- * Returns null when no key is configured, the request fails, or the reply is
- * not valid JSON — callers treat null as "use the local fallback".
+ * Returns null when the backend is unreachable, no model is configured, or the
+ * reply was not usable JSON — callers treat null as "use the local fallback".
+ * Retries and back-off now happen server-side in routes/ai.js.
  */
-export async function chatJSON(prompt: string, retries = 2): Promise<any | null> {
-  if (!AI_API_KEY) return null;
+export async function chatJSON(prompt: string): Promise<any | null> {
+  if (!isAIConfigured) return null;
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch(`${BASE_URL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${AI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: MODEL,
-          messages: [{ role: "user", content: prompt }],
-          response_format: { type: "json_object" },
-        }),
-      });
-
-      // 503 "model overloaded" and 429 "rate limited" are transient on free
-      // tiers — back off briefly and try again before giving up to the caller's
-      // heuristic fallback.
-      if ((res.status === 503 || res.status === 429) && attempt < retries) {
-        await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
-        continue;
-      }
-
-      if (!res.ok) {
-        console.warn(`[aiClient] ${MODEL} request failed: HTTP ${res.status}`);
-        return null;
-      }
-
-      const json = await res.json();
-      const content = json?.choices?.[0]?.message?.content;
-      if (!content) {
-        // Some models return an empty message when they spend their budget on
-        // internal reasoning; retrying usually produces a usable reply.
-        if (attempt < retries) continue;
-        return null;
-      }
-      return JSON.parse(content);
-    } catch (e) {
-      if (attempt < retries) continue;
-      console.warn("[aiClient] request error:", e);
+  try {
+    const res = await apiFetch<{ data: any | null; reason?: string }>(
+      "/api/ai/chat",
+      { method: "POST", body: JSON.stringify({ prompt }), timeoutMs: TIMEOUT_MS },
+      true,
+    );
+    if (res?.data == null) {
+      console.warn(`[aiClient] no usable result (${res?.reason ?? "unknown"})`);
       return null;
     }
+    return res.data;
+  } catch (e: any) {
+    console.warn("[aiClient] request failed:", e?.message ?? e);
+    return null;
   }
-  return null;
 }

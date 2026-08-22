@@ -19,9 +19,23 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-async function apiFetch<T = unknown>(
+/**
+ * RequestInit plus an optional per-call timeout. AI requests can legitimately
+ * take tens of seconds (CPU inference behind a proxy), while an auth call that
+ * hangs that long is already broken — so the budget belongs to the caller
+ * rather than being a single constant here.
+ */
+export type ApiInit = RequestInit & { timeoutMs?: number };
+
+/**
+ * Shared HTTP entry point: attaches the access token, refreshes it once on a
+ * 401, sends the device ID, and retries network failures with back-off.
+ * Exported so the AI proxy and sync clients get all of that for free instead
+ * of each re-implementing token handling.
+ */
+export async function apiFetch<T = unknown>(
   path: string,
-  init: RequestInit = {},
+  init: ApiInit = {},
   withAuth = false,
   _retryCount = 0,
 ): Promise<T> {
@@ -40,8 +54,10 @@ async function apiFetch<T = unknown>(
   const deviceId = await SessionManager.getOrCreateDeviceId();
   headers["X-Device-Id"] = deviceId;
 
+  const signal = init.timeoutMs ? AbortSignal.timeout(init.timeoutMs) : init.signal;
+
   try {
-    const res = await fetch(url, { ...init, headers });
+    const res = await fetch(url, { ...init, headers, signal });
 
     // Token expired — try to refresh once, then retry
     if (res.status === 401 && withAuth && _retryCount === 0) {
@@ -56,7 +72,7 @@ async function apiFetch<T = unknown>(
           );
           await SessionManager.saveTokens(refreshed);
           headers["Authorization"] = `Bearer ${refreshed.accessToken}`;
-          const retryRes = await fetch(url, { ...init, headers });
+          const retryRes = await fetch(url, { ...init, headers, signal });
           if (retryRes.ok) return retryRes.json() as T;
         } catch {
           // Refresh failed — fall through to error
@@ -77,6 +93,10 @@ async function apiFetch<T = unknown>(
 
     return res.json() as T;
   } catch (e: any) {
+    // A timeout is a deliberate give-up, not a transient failure: retrying it
+    // three times with back-off would multiply the wait the caller asked to cap.
+    if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
+
     // Network error (not an HTTP error) — retry with exponential back-off
     if (!e.status && _retryCount < MAX_RETRIES) {
       const delay = BASE_DELAY * Math.pow(2, _retryCount);

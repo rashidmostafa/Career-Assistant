@@ -7,6 +7,7 @@ const router   = express.Router();
 const User     = require("../models/User");
 const Session  = require("../models/Session");
 const AuditLog = require("../models/AuditLog");
+const UserData = require("../models/UserData");
 const AuthService = require("../services/authService");
 const { authenticate } = require("../middleware/authMiddleware");
 
@@ -86,6 +87,13 @@ router.get("/export", authenticate, async (req, res) => {
       .limit(100)
       .lean();
 
+    // Article 20 covers everything held for the account, not just the auth
+    // record — CV, roadmap, interview history, job matches and portfolio all
+    // live in UserData now that they sync, so they belong in the export too.
+    const featureData = await UserData.find({ userId: req.userId })
+      .select("namespace payload updatedAt")
+      .lean();
+
     const safeUser = user.toSafeObject();
     const exportData = {
       exportedAt: new Date().toISOString(),
@@ -106,6 +114,10 @@ router.get("/export", authenticate, async (req, res) => {
         createdAt:       s.createdAt,
         sessionStartedAt: s.sessionStartedAt,
       })),
+      appData: featureData.reduce((acc, d) => {
+        acc[d.namespace] = { payload: d.payload, updatedAt: d.updatedAt };
+        return acc;
+      }, {}),
     };
 
     if (format === "json") {
@@ -126,6 +138,10 @@ router.get("/export", authenticate, async (req, res) => {
       ...exportData.auditLog.map((l) =>
         [l.event, l.success, l.ipAddress, l.deviceId, l.createdAt].map(escape).join(",")
       ),
+      "",
+      "# APP DATA (namespaces — full contents are in the JSON export)",
+      "namespace,updatedAt",
+      ...featureData.map((d) => [d.namespace, d.updatedAt].map(escape).join(",")),
       "",
       "# SESSIONS",
       "deviceId,deviceInfo,ipAddress,isRevoked,createdAt",

@@ -53,6 +53,16 @@ services:
       - key: ALLOWED_ORIGINS
         sync: false
 
+      # Origins allowed to receive the OAuth callback, checked alongside
+      # ALLOWED_ORIGINS by isAllowedRedirectUri(). The web build MUST be listed
+      # here or Google sign-in cannot complete from a browser: the callback
+      # appends the session tokens to this URI, so an unlisted origin is
+      # refused rather than trusted. Native builds need nothing — they use
+      # exp:// and career-assistant://, which are always accepted.
+      #   e.g. https://career-assistant.netlify.app
+      - key: WEB_ORIGINS
+        sync: false
+
       # Email OTP delivery over the Gmail HTTP API. Render blocks outbound
       # SMTP (25/465/587), so nodemailer times out there no matter what; and
       # third-party senders reject an @gmail.com From under DMARC, which rules
@@ -78,4 +88,32 @@ services:
       - key: SMTP_USER
         sync: false
       - key: SMTP_PASS
+        sync: false
+
+      # ── AI providers ─────────────────────────────────────────────────────
+      # The general-purpose model key. This used to be
+      # EXPO_PUBLIC_OPENAI_API_KEY in the app's .env, which Expo inlines into
+      # the JS bundle at build time — meaning it shipped inside the APK and was
+      # extractable. routes/ai.js proxies those calls now and the key stays
+      # here. Rotate the old one: assume anything that shipped is compromised.
+      - key: AI_API_KEY
+        sync: false
+
+      # Any OpenAI-compatible endpoint. Changing the provider or model is a
+      # dashboard edit now, not an app rebuild.
+      - key: AI_BASE_URL
+        value: https://generativelanguage.googleapis.com/v1beta/openai
+      - key: AI_MODEL
+        value: gemini-3.6-flash
+
+      # ── Hawk (self-hosted fine-tuned model) ──────────────────────────────
+      # Public URL of serve_hawk.py — a tunnel to the GPU box, or a host.
+      # Leave blank and /api/ai/hawk/* returns data:null, which every caller
+      # already handles by falling back to its deterministic path. Setting it
+      # is what "turns Hawk on"; no app rebuild is involved either way.
+      - key: HAWK_URL
+        sync: false
+      # Sent as X-Hawk-Secret. serve_hawk.py ships with no authentication, so
+      # set this before Hawk is reachable from outside the LAN.
+      - key: HAWK_SECRET
         sync: false

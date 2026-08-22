@@ -9,19 +9,42 @@
  * `aiClient`, which talks to a general model — see docs/HAWK_INTEGRATION.md for
  * the measurements behind that split.
  *
- * Configure via .env:
- *   EXPO_PUBLIC_HAWK_URL=http://192.168.1.20:8000     # LAN dev
- *   EXPO_PUBLIC_HAWK_URL=https://<tunnel>.ngrok.app   # phone off-LAN
+ * Requests no longer go to the Hawk host directly. They go to the app's own
+ * backend at `/api/ai/hawk/{task}`, which forwards them. That indirection buys
+ * three things the direct path could not:
  *
- * When the URL is unset or the server is unreachable, every call resolves to
- * null and callers keep their existing deterministic fallback, so the app stays
- * fully functional with no model running.
+ *   - Hawk's address stops being a build-time constant. EXPO_PUBLIC_* is
+ *     inlined into the bundle at build time, so every change of the GPU box's
+ *     LAN IP previously meant rebuilding and reinstalling the app. It is now a
+ *     server environment variable.
+ *   - serve_hawk.py has no authentication of its own. The backend requires a
+ *     signed-in user and adds a shared secret upstream, so exposing Hawk
+ *     through a tunnel no longer means exposing it to the internet.
+ *   - Calls are rate limited per account rather than not at all.
+ *
+ * Configure on the SERVER: HAWK_URL, HAWK_SECRET. The app only needs
+ * EXPO_PUBLIC_API_URL.
+ *
+ * When Hawk is unset or unreachable, every call still resolves to null and
+ * callers keep their existing deterministic fallback, so the app stays fully
+ * functional with no model running.
  */
+import { apiFetch } from "./authApiService";
 
-const BASE_URL = (process.env.EXPO_PUBLIC_HAWK_URL ?? "").replace(/\/$/, "");
-const TIMEOUT_MS = Number(process.env.EXPO_PUBLIC_HAWK_TIMEOUT_MS ?? 20000);
+const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "";
 
-export const isHawkConfigured = BASE_URL.length > 0;
+// Raised from the original 20s. That budget was tuned for a GPU on the same
+// Wi-Fi; a proxied call to CPU inference — possibly waking a spun-down
+// instance first — legitimately exceeds it, and timing out early just discards
+// a good answer the server was still producing.
+const TIMEOUT_MS = Number(process.env.EXPO_PUBLIC_HAWK_TIMEOUT_MS ?? 60000);
+
+/**
+ * True when the app knows where its backend is. Whether Hawk itself is
+ * configured and running behind it is answered by hawkHealth(), or implicitly
+ * by any task call returning null.
+ */
+export const isHawkConfigured = API_URL.length > 0;
 
 export type HawkTask =
   | "nlp_analyzer"
@@ -136,52 +159,44 @@ export interface HawkInterviewQuestion {
 async function callHawk<T>(task: HawkTask, input: string): Promise<T | null> {
   if (!isHawkConfigured || !input.trim()) return null;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
   try {
-    const res = await fetch(`${BASE_URL}/v1/hawk/${task}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ input }),
-      signal: controller.signal,
-    });
+    // The backend forwards Hawk's envelope verbatim, so the checks below are
+    // unchanged from when this talked to serve_hawk.py directly.
+    const envelope = await apiFetch<HawkEnvelope<T> & { reason?: string }>(
+      `/api/ai/hawk/${task}`,
+      { method: "POST", body: JSON.stringify({ input }), timeoutMs: TIMEOUT_MS },
+      true,
+    );
 
-    if (!res.ok) {
-      console.warn(`[hawk] ${task} failed: HTTP ${res.status}`);
-      return null;
-    }
-
-    const envelope = (await res.json()) as HawkEnvelope<T>;
-
-    // `ok:false` means the server got a reply it could not parse or that was
-    // missing required keys. A partial object is worse than no object here,
-    // because the caller's fallback produces a complete one.
-    if (!envelope.ok || !envelope.data) {
-      console.warn(`[hawk] ${task} returned unusable output`, envelope.meta?.missing_keys);
+    // `ok:false` means the model produced a reply that could not be parsed or
+    // was missing required keys — or that the proxy could not reach Hawk at
+    // all. A partial object is worse than no object here, because the caller's
+    // fallback produces a complete one.
+    if (!envelope?.ok || !envelope?.data) {
+      console.warn(`[hawk] ${task} returned unusable output`, envelope?.reason ?? envelope?.meta?.missing_keys);
       return null;
     }
     if (envelope.meta?.input_was_clipped) {
       console.warn(`[hawk] ${task}: input exceeded the model's 1536-token window and was clipped`);
     }
     return envelope.data;
-  } catch (e) {
-    const aborted = e instanceof Error && e.name === "AbortError";
-    console.warn(`[hawk] ${task} ${aborted ? `timed out after ${TIMEOUT_MS}ms` : "request error"}`);
+  } catch (e: any) {
+    const timedOut = e?.name === "AbortError" || e?.name === "TimeoutError";
+    console.warn(`[hawk] ${task} ${timedOut ? `timed out after ${TIMEOUT_MS}ms` : "request error"}`);
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
-/** True when the Hawk server is up and has its adapter loaded. */
+/** True when the backend reports Hawk configured and reachable. */
 export async function hawkHealth(): Promise<boolean> {
   if (!isHawkConfigured) return false;
   try {
-    const res = await fetch(`${BASE_URL}/health`);
-    if (!res.ok) return false;
-    const body = await res.json();
-    return body?.status === "ok";
+    const status = await apiFetch<{ hawk?: { configured: boolean; reachable: boolean } }>(
+      "/api/ai/status",
+      { timeoutMs: 15000 },
+      true,
+    );
+    return Boolean(status?.hawk?.configured && status?.hawk?.reachable);
   } catch {
     return false;
   }

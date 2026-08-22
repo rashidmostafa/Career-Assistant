@@ -186,6 +186,34 @@ router.post("/reset-password", authLimiter, async (req, res) => {
  *   - <APP_DEEP_LINK scheme>://... (standalone build, e.g. career-assistant://)
  *   - https://<origin in ALLOWED_ORIGINS>/... (web fallback)
  */
+/** Minimal HTML escaping for values echoed back into the error page. */
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+/**
+ * A self-contained error page. OAuth failures surface inside a browser tab the
+ * app opened, so an explanation there is the only thing the user can actually
+ * see — the app itself has no way to render this.
+ */
+function oauthErrorPage(title, detail) {
+  return `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign-in failed</title>
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;
+       display:grid;place-items:center;min-height:100vh;background:#0f1115;color:#e6e8eb;padding:24px}
+  .card{max-width:32rem;background:#181b21;border:1px solid #272b33;border-radius:12px;padding:28px}
+  h1{font-size:1.15rem;margin:0 0 12px}
+  p{margin:0;line-height:1.6;color:#a8b0ba;font-size:.94rem}
+  code{background:#0f1115;padding:2px 6px;border-radius:4px;font-size:.85em;word-break:break-all;color:#d8dee6}
+</style></head><body><div class="card">
+<h1>${escapeHtml(title)}</h1><p>${detail}</p>
+</div></body></html>`;
+}
+
 function isAllowedRedirectUri(uri) {
   if (!uri || typeof uri !== "string") return false;
   let parsed;
@@ -195,14 +223,35 @@ function isAllowedRedirectUri(uri) {
     return false;
   }
 
+  // Expo Go: exp://192.168.x.x:8081/--/oauth/callback
   if (parsed.protocol === "exp:") return true;
 
+  // Standalone / dev-client build: career-assistant://oauth/callback
   const appScheme = (process.env.APP_DEEP_LINK ?? "career-assistant://").split("://")[0];
   if (parsed.protocol === `${appScheme}:`) return true;
 
+  // Web build: https://your-web-build/oauth/callback
+  //
+  // This list must stay strict. The callback appends the access and refresh
+  // tokens to this URI as query parameters, so an unchecked value here is not
+  // an open redirect but a full account takeover — an attacker who can choose
+  // the destination receives the victim's session.
+  //
+  // WEB_ORIGINS is checked alongside ALLOWED_ORIGINS so the CORS list and the
+  // OAuth-return list can differ; either one is enough.
   if (parsed.protocol === "https:" || parsed.protocol === "http:") {
-    const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "").split(",").filter(Boolean);
-    if (allowedOrigins.includes(parsed.origin)) return true;
+    const origins = [
+      ...(process.env.ALLOWED_ORIGINS ?? "").split(","),
+      ...(process.env.WEB_ORIGINS ?? "").split(","),
+    ].map((o) => o.trim()).filter(Boolean);
+
+    if (origins.includes(parsed.origin)) return true;
+
+    // localhost is permitted in development only, so `expo start --web`
+    // works without configuration while never being accepted in production.
+    if (process.env.NODE_ENV !== "production" && /^(localhost|127\.0\.0\.1)$/.test(parsed.hostname)) {
+      return true;
+    }
   }
 
   return false;
@@ -220,8 +269,27 @@ function isAllowedRedirectUri(uri) {
 router.get("/google", (req, res, next) => {
   // Store the client's desired redirect URI in the session so the callback
   // can use it regardless of whether the OAuth provider preserves query params.
-  // Rejects anything not matching the whitelist to prevent open-redirect abuse.
-  if (req.query.redirectUri && isAllowedRedirectUri(req.query.redirectUri)) {
+  //
+  // A rejected redirectUri used to be ignored silently: the flow continued,
+  // the callback fell back to APP_DEEP_LINK, and a web browser was handed a
+  // `career-assistant://` URL it could not open. The user saw a dead page
+  // while the app polled for two minutes and then reported "Sign-in timed
+  // out" — a configuration problem wearing the costume of a network problem.
+  // Refuse up front instead, and say exactly what is wrong.
+  if (req.query.redirectUri) {
+    if (!isAllowedRedirectUri(req.query.redirectUri)) {
+      console.warn(
+        `[OAuth/Google] Rejected redirectUri "${req.query.redirectUri}". ` +
+        `Allowed: exp://, ${(process.env.APP_DEEP_LINK ?? "career-assistant://").split("://")[0]}://, ` +
+        `and origins in ALLOWED_ORIGINS/WEB_ORIGINS ` +
+        `[${[...(process.env.ALLOWED_ORIGINS ?? "").split(","), ...(process.env.WEB_ORIGINS ?? "").split(",")].filter(Boolean).join(", ") || "none set"}].`
+      );
+      return res.status(400).type("html").send(oauthErrorPage(
+        "This app build is not authorised to sign in with Google.",
+        `The address it asked to return to (<code>${escapeHtml(req.query.redirectUri)}</code>) is not on the server's allow-list. ` +
+        `If this is the web build, add its origin to <code>WEB_ORIGINS</code> on the server and try again.`
+      ));
+    }
     req.session.oauthRedirectUri = req.query.redirectUri;
   }
   passport.authenticate("google", {
@@ -271,9 +339,14 @@ router.get("/google/callback",
   }
 );
 
-// OAuth error fallback (shown if browser deep-link fails)
+// OAuth error fallback (shown if browser deep-link fails).
+// This is rendered inside a real browser, so it returns a page a person can
+// read rather than a JSON body they cannot act on.
 router.get("/oauth/error", (_req, res) => {
-  res.status(400).json({ message: "Social sign-in failed. Please try again." });
+  res.status(400).type("html").send(oauthErrorPage(
+    "Sign-in failed",
+    "Google sign-in could not be completed. Close this window and try again."
+  ));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
