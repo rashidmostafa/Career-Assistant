@@ -2,6 +2,16 @@
 // survives a reinstall and follows the user to a new phone. Same API.
 import AsyncStorage from "@/services/syncedStorage";
 import { chatJSON, isAIConfigured } from "@/services/aiClient";
+import {
+  generateMilestoneRoadmap,
+  updateRoadmapAfterCompletion,
+  applyLevelUp,
+  diffRoadmaps,
+  describeDiff,
+  enforceStatuses,
+  type MilestoneRoadmap,
+  type Milestone,
+} from "@/services/roadmapAI";
 import { useCV } from "@/context/CVContext";
 import React, {
   createContext,
@@ -136,6 +146,19 @@ export interface RoadmapState {
   promoteSkillToCareerTrack: (skillId: string) => Promise<void>;
   dismissExpiredJob: (jobId: string) => Promise<void>;
   // legacy compat
+  // ── Milestone roadmap ──────────────────────────────────────────────────────
+  // The plan the roadmap screen renders: an ordered list of milestones with no
+  // weeks, dates or durations. The week-based fields above remain only to keep
+  // the home and profile screens working unchanged.
+  milestoneRoadmap: MilestoneRoadmap | null;
+  isBuilding: boolean;
+  buildError: string | null;
+  lastChangeSummary: string | null;
+  buildMilestoneRoadmap: (opts?: { silent?: boolean }) => Promise<void>;
+  completeMilestone: (id: string) => Promise<void>;
+  levelUp: (update: string) => Promise<void>;
+  clearChangeSummary: () => void;
+
   roadmap: LegacyRoadmap | null;
   generateRoadmapLegacy: (skillGaps: string[], targetRole: string, experienceLevel?: string) => Promise<void>;
   toggleModule: (moduleId: string) => Promise<void>;
@@ -527,60 +550,138 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  // ── Milestone roadmap ────────────────────────────────────────────────────────
+  const [milestoneRoadmap, setMilestoneRoadmap] = useState<MilestoneRoadmap | null>(null);
+  const [isBuilding, setIsBuilding] = useState(false);
+  const [buildError, setBuildError] = useState<string | null>(null);
+  const [lastChangeSummary, setLastChangeSummary] = useState<string | null>(null);
+
+  const msKey = user ? `ms_roadmap_${user.id}_${roleKey}` : null;
+
+  // Load whatever was saved for this user and role.
+  useEffect(() => {
+    if (!msKey) { setMilestoneRoadmap(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(msKey);
+        if (!cancelled) setMilestoneRoadmap(raw ? (JSON.parse(raw) as MilestoneRoadmap) : null);
+      } catch {
+        if (!cancelled) setMilestoneRoadmap(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [msKey]);
+
+  const persistMilestones = useCallback(async (next: MilestoneRoadmap | null) => {
+    setMilestoneRoadmap(next);
+    if (!msKey) return;
+    try {
+      if (next) await AsyncStorage.setItem(msKey, JSON.stringify(next));
+      else await AsyncStorage.removeItem(msKey);
+    } catch (e: any) {
+      console.warn("[roadmap] could not persist milestones:", e?.message ?? e);
+    }
+  }, [msKey]);
+
+  /** The inputs every generation call needs, gathered in one place. */
+  const generationInput = useCallback(() => ({
+    cvText: cvProfile?.rawText ?? "",
+    cvSkills: cvProfile?.skills ?? [],
+    targetRole: user?.targetRole || targetRole || "your target role",
+    experienceLevel: user?.experienceLevel || undefined,
+  }), [cvProfile, user?.targetRole, user?.experienceLevel, targetRole]);
+
+  const buildMilestoneRoadmap = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!user) return;
+    if (!opts?.silent) { setIsBuilding(true); setBuildError(null); }
+    try {
+      const next = await generateMilestoneRoadmap(generationInput());
+      if (!next) {
+        // Keeping the existing plan beats replacing it with nothing.
+        setBuildError(
+          isAIConfigured
+            ? "Couldn't reach the AI to build your roadmap. Your existing plan is unchanged — try again in a moment."
+            : "AI isn't configured, so a personalised roadmap can't be generated."
+        );
+        return;
+      }
+      await persistMilestones(next);
+      setLastChangeSummary(null);
+    } finally {
+      if (!opts?.silent) setIsBuilding(false);
+    }
+  }, [user, generationInput, persistMilestones]);
+
+  const completeMilestone = useCallback(async (id: string) => {
+    if (!milestoneRoadmap) return;
+
+    // Mark it done immediately: the user's own action should never wait on a
+    // model call, and the re-plan below only reorders what remains.
+    const marked = milestoneRoadmap.milestones.map((m) =>
+      m.id === id ? { ...m, status: "completed" as const } : m
+    );
+    const optimistic: MilestoneRoadmap = {
+      ...milestoneRoadmap,
+      milestones: enforceStatuses(marked),
+      updatedAt: new Date().toISOString(),
+    };
+    await persistMilestones(optimistic);
+
+    const completedIds = optimistic.milestones.filter((m) => m.status === "completed").map((m) => m.id);
+
+    setIsBuilding(true);
+    try {
+      const replanned = await updateRoadmapAfterCompletion(optimistic, completedIds);
+      if (!replanned) {
+        setLastChangeSummary("1 completed · plan unchanged (AI unavailable)");
+        return;
+      }
+      setLastChangeSummary(describeDiff(diffRoadmaps(optimistic, replanned)));
+      await persistMilestones(replanned);
+    } finally {
+      setIsBuilding(false);
+    }
+  }, [milestoneRoadmap, persistMilestones]);
+
+  const levelUp = useCallback(async (update: string) => {
+    if (!milestoneRoadmap || !update.trim()) return;
+    setIsBuilding(true);
+    setBuildError(null);
+    try {
+      const next = await applyLevelUp(milestoneRoadmap, update.trim(), generationInput());
+      if (!next) {
+        setBuildError("Couldn't update your roadmap just now. Your existing plan is unchanged.");
+        return;
+      }
+      setLastChangeSummary(describeDiff(diffRoadmaps(milestoneRoadmap, next)));
+      await persistMilestones(next);
+    } finally {
+      setIsBuilding(false);
+    }
+  }, [milestoneRoadmap, generationInput, persistMilestones]);
+
+  const clearChangeSummary = useCallback(() => setLastChangeSummary(null), []);
+
   // ── Generate ─────────────────────────────────────────────────────────────────
+  /**
+   * Entry point kept for the screens that already call it: the CV screen after
+   * an analysis, and the jobs screen after a match. It now produces the
+   * milestone plan the roadmap screen renders, so those call sites did not have
+   * to change. The week model it used to build is no longer generated.
+   */
   const generateRoadmap = useCallback(
     async (
-      skillGaps: string[],
+      _skillGaps: string[],
       role: string,
-      experienceLevel = "Intermediate",
-      jobDeadline?: { jobId: string; jobTitle: string; company: string; deadlineDate: string }
+      _experienceLevel = "Intermediate",
+      _jobDeadline?: { jobId: string; jobTitle: string; company: string; deadlineDate: string }
     ) => {
       if (!user) return;
-      setIsGenerating(true);
-      try {
-        // Ask for a plan built from this CV and this role. Its length reflects
-        // the size of the real gap rather than a fixed six-week template.
-        const aiWeeks = await generatePlanWithAI({
-          role,
-          experienceLevel,
-          gaps: skillGaps ?? [],
-          cvSkills: cvProfile?.skills ?? [],
-          cvText: cvProfile?.rawText ?? "",
-        });
-
-        const jobWeeks = buildWeeks(aiWeeks ?? getTemplate(role), "job", 1);
-        // The career track stays template-driven on purpose: communication,
-        // open-source contribution and portfolio work do not vary by target
-        // role the way technical gaps do.
-        const careerWeeks = buildWeeks(CAREER_EXTRAS, "career", jobWeeks.length + 1);
-        const allWeeks = [...jobWeeks, ...careerWeeks];
-
-        const newDeadlines = [...jobDeadlines];
-        if (jobDeadline) {
-          const daysLeft = daysUntil(jobDeadline.deadlineDate);
-          const dl: JobDeadline = {
-            ...jobDeadline,
-            weeksToDeadline: Math.round(daysLeft / 7),
-            riskLevel: calcRisk(daysLeft, remainingDays(allWeeks)),
-            emergencyStrategies: EMERGENCY_STRATEGIES,
-            isExpired: daysLeft <= 0,
-            alternativeJobs: [],
-          };
-          const idx = newDeadlines.findIndex((d) => d.jobId === jobDeadline.jobId);
-          if (idx >= 0) newDeadlines[idx] = dl;
-          else newDeadlines.push(dl);
-        }
-
-        setWeeks(allWeeks);
-        setTargetRole(role);
-        setJobDeadlines(newDeadlines);
-        setLastRegeneratedAt(new Date().toISOString());
-        await save(allWeeks, careerTrackSkills, newDeadlines, role);
-      } finally {
-        setIsGenerating(false);
-      }
+      if (role) setTargetRole(role);
+      await buildMilestoneRoadmap();
     },
-    [user, jobDeadlines, careerTrackSkills, save]
+    [user, buildMilestoneRoadmap]
   );
 
   // ── Toggle skill ─────────────────────────────────────────────────────────────
@@ -720,17 +821,6 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
   const setReducedMotion = useCallback((v: boolean) => { setReducedMotionState(v); saveSettings(viewMode, v, highContrast); }, [viewMode, highContrast, saveSettings]);
   const setHighContrast = useCallback((v: boolean) => { setHighContrastState(v); saveSettings(viewMode, reducedMotion, v); }, [viewMode, reducedMotion, saveSettings]);
 
-  // ── Legacy compat ─────────────────────────────────────────────────────────────
-  const legacyRoadmap: LegacyRoadmap | null = weeks.length > 0 ? {
-    id: `lr_${user?.id}`,
-    userId: user?.id ?? "",
-    title: `${targetRole} Roadmap`,
-    role: targetRole,
-    level: "Intermediate",
-    modules: weeks.map((w) => ({ id: w.id, week: w.weekNumber, topic: w.topic, description: w.description, level: w.level, tasks: w.tasks, resources: w.resources, completed: w.isCompleted })),
-    createdAt: lastRegeneratedAt ?? new Date().toISOString(),
-  } : null;
-
   const generateRoadmapLegacy = useCallback(
     (skillGaps: string[], role: string, experienceLevel?: string) => generateRoadmap(skillGaps, role, experienceLevel),
     [generateRoadmap]
@@ -750,6 +840,42 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
     [weeks, careerTrackSkills, jobDeadlines, targetRole, save, markWeekComplete]
   );
 
+
+
+  // ── Legacy compat ─────────────────────────────────────────────────────────────
+  // The home and profile screens read `roadmap.modules`. They are outside this
+  // rebuild, so rather than changing them, the milestone plan is projected into
+  // the shape they already expect. Falls back to the week model only if a plan
+  // predating milestones is still stored.
+  const legacyRoadmap: LegacyRoadmap | null = milestoneRoadmap
+    ? {
+        id: `lr_${user?.id}`,
+        userId: user?.id ?? "",
+        title: `${milestoneRoadmap.targetRole} Roadmap`,
+        role: milestoneRoadmap.targetRole,
+        level: "Intermediate",
+        modules: milestoneRoadmap.milestones.map((m, i) => ({
+          id: m.id,
+          week: i + 1,
+          topic: m.title,
+          description: m.description,
+          level: "Intermediate" as const,
+          tasks: m.actions,
+          resources: m.resources.map((r) => ({ title: r, url: "", type: "article" as const })),
+          completed: m.status === "completed",
+        })),
+        createdAt: milestoneRoadmap.updatedAt,
+      }
+    : weeks.length > 0 ? {
+        id: `lr_${user?.id}`,
+        userId: user?.id ?? "",
+        title: `${targetRole} Roadmap`,
+        role: targetRole,
+        level: "Intermediate",
+        modules: weeks.map((w) => ({ id: w.id, week: w.weekNumber, topic: w.topic, description: w.description, level: w.level, tasks: w.tasks, resources: w.resources, completed: w.isCompleted })),
+        createdAt: lastRegeneratedAt ?? new Date().toISOString(),
+      } : null;
+
   return (
     <RoadmapContext.Provider value={{
       weeks, isGenerating, isDynamic: true, macroProgress, targetRole,
@@ -758,6 +884,8 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
       generateRoadmap, toggleSkillStatus, markWeekComplete, clearRoadmap,
       setViewMode, setReducedMotion, setHighContrast,
       switchTargetRole, applyEmergencyStrategy, promoteSkillToCareerTrack, dismissExpiredJob,
+      milestoneRoadmap, isBuilding, buildError, lastChangeSummary,
+      buildMilestoneRoadmap, completeMilestone, levelUp, clearChangeSummary,
       roadmap: legacyRoadmap, generateRoadmapLegacy, toggleModule,
     }}>
       {children}

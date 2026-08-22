@@ -98,12 +98,18 @@ router.get("/status", authenticate, async (_req, res) => {
 
 // ─── General LLM ──────────────────────────────────────────────────────────────
 router.post("/chat", authenticate, aiLimiter, async (req, res) => {
-  const { prompt } = req.body ?? {};
+  // `json: false` returns the model's prose instead of forcing a JSON object.
+  // The roadmap's per-milestone chat needs an answer a person reads; every
+  // other caller wants a parseable object, so JSON stays the default.
+  const { prompt, json = true, system } = req.body ?? {};
   if (typeof prompt !== "string" || !prompt.trim()) {
     return res.status(400).json({ message: "A non-empty `prompt` string is required." });
   }
   if (prompt.length > MAX_INPUT_CHARS) {
     return res.status(413).json({ message: `Prompt exceeds ${MAX_INPUT_CHARS} characters.` });
+  }
+  if (typeof system === "string" && system.length > MAX_INPUT_CHARS) {
+    return res.status(413).json({ message: `System prompt exceeds ${MAX_INPUT_CHARS} characters.` });
   }
   if (!AI_API_KEY) {
     return res.json({ data: null, reason: "not_configured" });
@@ -120,8 +126,13 @@ router.post("/chat", authenticate, aiLimiter, async (req, res) => {
         },
         body: JSON.stringify({
           model: AI_MODEL,
-          messages: [{ role: "user", content: prompt }],
-          response_format: { type: "json_object" },
+          messages: [
+            ...(typeof system === "string" && system.trim()
+              ? [{ role: "system", content: system }]
+              : []),
+            { role: "user", content: prompt },
+          ],
+          ...(json ? { response_format: { type: "json_object" } } : {}),
         }),
       }, AI_TIMEOUT_MS);
 
@@ -148,6 +159,8 @@ router.post("/chat", authenticate, aiLimiter, async (req, res) => {
         return res.json({ data: null, reason: "empty_completion" });
       }
 
+      if (!json) return res.json({ data: content });
+
       try {
         return res.json({ data: JSON.parse(content) });
       } catch (_) {
@@ -161,6 +174,101 @@ router.post("/chat", authenticate, aiLimiter, async (req, res) => {
     }
   }
   return res.json({ data: null, reason: "exhausted_retries" });
+});
+
+// ─── Streaming chat ───────────────────────────────────────────────────────────
+/**
+ * Server-sent events passthrough for the roadmap's per-milestone chat.
+ *
+ * The non-streaming /chat is right for structured output — there is nothing to
+ * show until the JSON is complete. A chat answer is different: waiting ten
+ * seconds for a wall of text reads as broken, so the tokens are forwarded as
+ * they arrive.
+ *
+ * Upstream is asked for `stream: true` in the OpenAI wire format and its SSE
+ * frames are re-emitted as our own, rather than proxying the body verbatim, so
+ * the client never sees provider-shaped payloads and a mid-stream upstream
+ * error can still be delivered as a clean event.
+ */
+router.post("/chat/stream", authenticate, aiLimiter, async (req, res) => {
+  const { prompt, system } = req.body ?? {};
+  if (typeof prompt !== "string" || !prompt.trim()) {
+    return res.status(400).json({ message: "A non-empty `prompt` string is required." });
+  }
+  if (prompt.length > MAX_INPUT_CHARS) {
+    return res.status(413).json({ message: `Prompt exceeds ${MAX_INPUT_CHARS} characters.` });
+  }
+
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");   // stop proxies buffering the stream
+  res.flushHeaders?.();
+
+  const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+  if (!AI_API_KEY) {
+    send("error", { reason: "not_configured" });
+    return res.end();
+  }
+
+  try {
+    const upstream = await fetchWithTimeout(`${AI_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${AI_API_KEY}` },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        messages: [
+          ...(typeof system === "string" && system.trim() ? [{ role: "system", content: system }] : []),
+          { role: "user", content: prompt },
+        ],
+        stream: true,
+      }),
+    }, AI_TIMEOUT_MS);
+
+    if (!upstream.ok || !upstream.body) {
+      console.warn(`[AI] stream responded HTTP ${upstream.status}`);
+      send("error", { reason: `upstream_${upstream.status}` });
+      return res.end();
+    }
+
+    // If the client navigates away, stop pulling tokens we are still paying for.
+    let aborted = false;
+    req.on("close", () => { aborted = true; });
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    for await (const chunk of upstream.body) {
+      if (aborted) break;
+      buffer += decoder.decode(chunk, { stream: true });
+
+      // SSE frames are separated by a blank line; a chunk can split one.
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() ?? "";
+
+      for (const frame of frames) {
+        const line = frame.split("\n").find((l) => l.startsWith("data:"));
+        if (!line) continue;
+        const payload = line.slice(5).trim();
+        if (payload === "[DONE]") continue;
+        try {
+          const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content;
+          if (delta) send("token", { text: delta });
+        } catch (_) {
+          // A frame we cannot parse is not worth killing the stream over.
+        }
+      }
+    }
+
+    send("done", {});
+    res.end();
+  } catch (e) {
+    const aborted = e instanceof Error && e.name === "AbortError";
+    console.warn(`[AI] stream ${aborted ? "timed out" : "failed"}:`, e.message);
+    send("error", { reason: aborted ? "timeout" : "network_error" });
+    res.end();
+  }
 });
 
 // ─── Hawk ─────────────────────────────────────────────────────────────────────
