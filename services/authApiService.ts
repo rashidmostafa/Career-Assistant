@@ -28,6 +28,24 @@ function sleep(ms: number) {
 export type ApiInit = RequestInit & { timeoutMs?: number };
 
 /**
+ * A signal that aborts after `ms`.
+ *
+ * Not `AbortSignal.timeout(ms)`: React Native polyfills AbortSignal from the
+ * `abort-controller` package (see setUpXHR.js), which implements the older
+ * spec and provides no static `timeout`. Calling it throws
+ * "AbortSignal.timeout is not a function" — and because every caller here
+ * treats a thrown request as a soft failure, that turned into AI calls, data
+ * sync and push registration all failing silently on device while working
+ * perfectly in Node. AbortController itself *is* polyfilled, so this builds
+ * the same behaviour from parts that exist.
+ */
+function timeoutSignal(ms: number): { signal: AbortSignal; clear: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
+}
+
+/**
  * Shared HTTP entry point: attaches the access token, refreshes it once on a
  * 401, sends the device ID, and retries network failures with back-off.
  * Exported so the AI proxy and sync clients get all of that for free instead
@@ -54,7 +72,10 @@ export async function apiFetch<T = unknown>(
   const deviceId = await SessionManager.getOrCreateDeviceId();
   headers["X-Device-Id"] = deviceId;
 
-  const signal = init.timeoutMs ? AbortSignal.timeout(init.timeoutMs) : init.signal;
+  // A fresh signal per attempt — reusing one across retries would hand the
+  // second attempt an already-aborted signal.
+  const timeout = init.timeoutMs ? timeoutSignal(init.timeoutMs) : null;
+  const signal = timeout ? timeout.signal : init.signal;
 
   try {
     const res = await fetch(url, { ...init, headers, signal });
@@ -104,6 +125,8 @@ export async function apiFetch<T = unknown>(
       return apiFetch<T>(path, init, withAuth, _retryCount + 1);
     }
     throw e;
+  } finally {
+    timeout?.clear();
   }
 }
 

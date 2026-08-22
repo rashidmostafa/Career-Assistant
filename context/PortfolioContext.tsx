@@ -129,7 +129,11 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   const save = async (updated: Portfolio) => {
     const normalized = normalizePortfolio(updated);
-    if (!normalized || !user) return;
+    // These used to return silently, which meant a failed save was
+    // indistinguishable from a successful one: the caller's catch never ran,
+    // no message appeared, and the link simply never showed up.
+    if (!user) throw new Error("You are signed out. Sign in and try again.");
+    if (!normalized) throw new Error("Could not save the portfolio — its stored data looks corrupted.");
     await AsyncStorage.setItem(`portfolio_${user.id}`, JSON.stringify(normalized));
     setPortfolio(normalized);
   };
@@ -220,7 +224,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addLink = async (rawUrl: string, label?: string) => {
-    if (!user || !isValidUrl(rawUrl)) return;
+    if (!user) throw new Error("You are signed out. Sign in and try again.");
+    if (!isValidUrl(rawUrl)) throw new Error(`"${rawUrl}" is not a valid web address.`);
     const url = normalizeUrl(rawUrl);
     const platform = detectPlatform(url);
 

@@ -24,13 +24,20 @@ const ARBEITNOW = "https://www.arbeitnow.com/api/job-board-api";
 const TIMEOUT_MS = 12_000;
 
 async function getJson(url: string): Promise<any | null> {
+  // AbortSignal.timeout is absent from React Native's AbortSignal polyfill, so
+  // this threw on every device call and the job feed silently fell back to an
+  // empty list — the listings never loaded outside a browser.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) return null;
     return await res.json();
   } catch {
     // Offline, timed out, or the source is down — the caller falls back.
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
