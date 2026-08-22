@@ -19,9 +19,16 @@
  *               the user's data.
  *   removeItem  clears both.
  *
- * The device copy stays authoritative for reads, so the app is fully usable
- * offline and a backend outage costs nothing but sync. Failed pushes are logged
- * and retried on the next write rather than surfaced to the user.
+ * MongoDB Atlas is the source of truth. `hydrate()` runs at sign-in and
+ * overwrites the device copy with what the server holds, so the local layer is
+ * a cache of the account rather than an independent store that happens to be
+ * backed up. Reads stay local afterwards because, post-hydrate, local *is* the
+ * server state — which keeps every screen off the network and keeps the app
+ * usable when Render is cold, spun down, or unreachable.
+ *
+ * `clearLocal()` runs at sign-out so the cache never outlives the session that
+ * created it, and a second account on the same device cannot read the first
+ * one's CV.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { apiFetch } from "./authApiService";
@@ -58,11 +65,14 @@ async function canSync(): Promise<boolean> {
  * throwing on parse, while genuine JSON is stored structured so it stays
  * readable in the GDPR export.
  */
-function encode(value: string): unknown {
+function encode(key: string, value: string): unknown {
+  // The original key travels with the payload so hydrate() can restore each
+  // namespace to the exact key its context reads. namespaceFor() lowercases and
+  // rewrites illegal characters, so the mapping cannot be reversed.
   try {
-    return { json: JSON.parse(value) };
+    return { key, json: JSON.parse(value) };
   } catch {
-    return { raw: value };
+    return { key, raw: value };
   }
 }
 
@@ -71,6 +81,25 @@ function decode(payload: any): string | null {
   if (typeof payload?.raw === "string") return payload.raw;
   if ("json" in (payload ?? {})) return JSON.stringify(payload.json);
   return null;
+}
+
+// ── Managed-key index ─────────────────────────────────────────────────────────
+// AsyncStorage has no prefix query, and clearing it wholesale would take the
+// auth tokens and theme with it, so the keys this module owns are tracked
+// explicitly.
+const KEY_INDEX = "__synced_keys";
+
+async function rememberKey(key: string) {
+  try {
+    const raw = await AsyncStorage.getItem(KEY_INDEX);
+    const keys: string[] = raw ? JSON.parse(raw) : [];
+    if (!keys.includes(key)) {
+      keys.push(key);
+      await AsyncStorage.setItem(KEY_INDEX, JSON.stringify(keys));
+    }
+  } catch {
+    // A missing index costs a less complete sign-out wipe, never a failed write.
+  }
 }
 
 // ── Debounced push queue ──────────────────────────────────────────────────────
@@ -82,7 +111,7 @@ async function push(key: string, value: string): Promise<void> {
   try {
     await apiFetch(
       `/api/data/${namespaceFor(key)}`,
-      { method: "PUT", body: JSON.stringify({ payload: encode(value) }), timeoutMs: SYNC_TIMEOUT_MS },
+      { method: "PUT", body: JSON.stringify({ payload: encode(key, value) }), timeoutMs: SYNC_TIMEOUT_MS },
       true,
     );
     pending.delete(key);
@@ -136,6 +165,7 @@ const syncedStorage = {
 
   async setItem(key: string, value: string): Promise<void> {
     await AsyncStorage.setItem(key, value);
+    await rememberKey(key);
     schedulePush(key, value);
   },
 
@@ -149,6 +179,72 @@ const syncedStorage = {
       await apiFetch(`/api/data/${namespaceFor(key)}`, { method: "DELETE", timeoutMs: SYNC_TIMEOUT_MS }, true);
     } catch (e: any) {
       console.warn(`[sync] delete failed for ${key}:`, e?.message ?? e);
+    }
+  },
+
+  /**
+   * Replaces the device cache with what the account holds on the server.
+   *
+   * This is what makes Atlas authoritative rather than merely a backup: without
+   * it, a device that already had local data would keep serving that data
+   * forever and never see writes made from another phone. Called at sign-in and
+   * after the OAuth callback.
+   *
+   * Returns how many namespaces were restored. A failure here is not fatal —
+   * the app carries on with whatever cache it has, which is the correct
+   * behaviour when the user is offline or Render is still waking up.
+   */
+  async hydrate(): Promise<{ pulled: number; failed: boolean }> {
+    if (!(await canSync())) return { pulled: 0, failed: false };
+    try {
+      const manifest = await apiFetch<{ namespaces: { namespace: string }[] }>(
+        "/api/data",
+        { timeoutMs: SYNC_TIMEOUT_MS },
+        true,
+      );
+
+      let pulled = 0;
+      for (const entry of manifest?.namespaces ?? []) {
+        try {
+          const res = await apiFetch<{ payload: any }>(
+            `/api/data/${entry.namespace}`,
+            { timeoutMs: SYNC_TIMEOUT_MS },
+            true,
+          );
+          const key = res?.payload?.key;
+          const value = decode(res?.payload);
+          if (typeof key === "string" && value !== null) {
+            await AsyncStorage.setItem(key, value);
+            await rememberKey(key);
+            pulled++;
+          }
+        } catch {
+          // One unreadable namespace must not abandon the rest.
+        }
+      }
+      return { pulled, failed: false };
+    } catch (e: any) {
+      console.warn("[sync] hydrate failed:", e?.message ?? e);
+      return { pulled: 0, failed: true };
+    }
+  },
+
+  /**
+   * Drops every cached namespace from the device. Called at sign-out: the data
+   * lives in Atlas, so nothing is lost, and leaving it behind would show the
+   * next account on this device the previous one's CV and roadmap.
+   */
+  async clearLocal(): Promise<void> {
+    try {
+      const raw = await AsyncStorage.getItem(KEY_INDEX);
+      const keys: string[] = raw ? JSON.parse(raw) : [];
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+      pending.clear();
+      await Promise.all(keys.map((k) => AsyncStorage.removeItem(k)));
+      await AsyncStorage.removeItem(KEY_INDEX);
+    } catch (e: any) {
+      console.warn("[sync] clearLocal failed:", e?.message ?? e);
     }
   },
 

@@ -14,6 +14,8 @@ import * as Device from "expo-constants";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { ReauthUrgency } from "./sessionManager";
+import { apiFetch } from "./authApiService";
+import { SessionManager } from "./sessionManager";
 
 const PUSH_TOKEN_KEY = "auth_push_token";
 const NOTIF_IDS_KEY  = "auth_scheduled_notif_ids";
@@ -65,9 +67,41 @@ export async function registerForPushNotifications(): Promise<string | null> {
       : await Notifications.getExpoPushTokenAsync();
 
     await AsyncStorage.setItem(PUSH_TOKEN_KEY, token);
+    // The device copy is only a cache to avoid re-registering. The token has to
+    // reach the account in Atlas, because it is the server that sends push —
+    // authService checks `user.pushToken` before dispatching a security alert,
+    // and that field stayed empty for every user while this token lived only
+    // on the phone.
+    await syncPushTokenToServer(token);
     return token;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Uploads the push token to the user's account.
+ *
+ * Best-effort by design: this runs during app start-up, possibly before the
+ * user has signed in, and a failure must never block notification setup. It is
+ * called again after sign-in so a token obtained while signed out still lands.
+ */
+export async function syncPushTokenToServer(token?: string | null): Promise<boolean> {
+  try {
+    const pushToken = token ?? (await AsyncStorage.getItem(PUSH_TOKEN_KEY));
+    if (!pushToken) return false;
+    // No session yet — AuthContext retries this after sign-in.
+    if (!(await SessionManager.getAccessToken())) return false;
+
+    await apiFetch("/api/user/push-token", {
+      method: "POST",
+      body: JSON.stringify({ pushToken }),
+      timeoutMs: 15000,
+    }, true);
+    return true;
+  } catch (e: any) {
+    console.warn("[notifications] could not register push token with the server:", e?.message ?? e);
+    return false;
   }
 }
 

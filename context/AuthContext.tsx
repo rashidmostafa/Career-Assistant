@@ -27,6 +27,8 @@ import { AppState, AppStateStatus } from "react-native";
 import { SessionManager, type ReauthUrgency } from "@/services/sessionManager";
 import { BiometricService } from "@/services/biometricService";
 import { AuthApiService } from "@/services/authApiService";
+import syncedStorage from "@/services/syncedStorage";
+import { syncPushTokenToServer } from "@/services/notificationService";
 import type { RiskLevel } from "@/services/riskScoring";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -241,6 +243,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try {
             const profile = await AuthApiService.getProfile();
             if (profile?.user) await persistUser(mapServerUser(profile.user));
+            // Atlas is the source of truth: refresh the device cache from the
+            // account before any feature context reads it, so a phone that has
+            // been offline picks up edits made elsewhere.
+            await syncedStorage.hydrate();
+            void syncPushTokenToServer();
           } catch {
             // Server unreachable — fall back to the last cached profile so the
             // app stays usable offline. A stale cache beats a blank screen.
@@ -320,6 +327,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     if (result.riskLevel) setRiskLevel(result.riskLevel as RiskLevel);
     await persistUser(mapServerUser(result.user));
+    // New session on this device — the cache may belong to nobody, or to a
+    // different account entirely.
+    await syncedStorage.hydrate();
+    void syncPushTokenToServer();
 
     setPendingVerificationEmail(null);
     setPendingUserId(null);
@@ -544,6 +555,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Best-effort — still clear local state even if the server is unreachable.
     }
     pendingPasswordRef.current = null;
+    // Flush first: a debounced write still in flight would otherwise be lost,
+    // and it is the user's most recent edit. Then drop the cache — the data
+    // lives in Atlas, and leaving it would expose it to the next account
+    // signed in on this device.
+    try {
+      await syncedStorage.flush();
+      await syncedStorage.clearLocal();
+    } catch {
+      // Never block sign-out on sync.
+    }
     await SessionManager.clearTokens();
     await AsyncStorage.removeItem(STORE.USER);
     setUser(null);
@@ -711,6 +732,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const profile = await AuthApiService.getProfile();
       if (profile?.user) await persistUser(mapServerUser(profile.user));
+      await syncedStorage.hydrate();
+      void syncPushTokenToServer();
     } catch (e) {
       console.warn("[AuthContext] loadUserFromServer failed:", e);
       const raw = await AsyncStorage.getItem(STORE.USER);

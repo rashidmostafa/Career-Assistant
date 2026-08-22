@@ -61,7 +61,8 @@ function buildGoogleStrategy() {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
       callbackURL,
       scope: ["openid", "profile", "email"],
-      // Pass the request object so we can read session data in the verify callback
+      // The verify callback needs only the Google profile; there is no session
+      // or request state to consult.
       passReqToCallback: false,
     },
     async (_accessToken, _refreshToken, profile, done) => {
@@ -84,37 +85,24 @@ function buildGoogleStrategy() {
   );
 }
 
-// ── Passport session serialisation (minimal — we use JWT, not sessions) ───────
-passport.serializeUser((user, done) => done(null, user._id.toString()));
-passport.deserializeUser(async (id, done) => {
-  try {
-    const user = await User.findById(id);
-    done(null, user);
-  } catch (e) {
-    done(e);
-  }
-});
+// No serializeUser/deserializeUser: nothing is stored in a session. Passport
+// is used purely to run the Google verify callback, and the resulting user is
+// read from req.user within that same request.
 
 // ── Export ────────────────────────────────────────────────────────────────────
 function initPassport(app) {
-  // express-session must be wired before passport
-  const session = require("express-session");
-  app.use(session({
-    secret:            process.env.SESSION_SECRET || "dev-session-secret-change-me",
-    resave:            false,
-    saveUninitialized: false,
-    cookie: {
-      secure:   process.env.NODE_ENV === "production",
-      httpOnly: true,
-      // "lax" is required for the Google OAuth round-trip: the callback is a
-      // top-level GET navigation from accounts.google.com back to this server,
-      // and only lax/none send the session cookie on a cross-site navigation.
-      // Set explicitly rather than relying on differing browser defaults.
-      sameSite: "lax",
-      maxAge:   10 * 60 * 1000, // 10 min — only needed for the OAuth round-trip
-    },
-  }));
-
+  // Deliberately no express-session.
+  //
+  // The only thing a session ever held was `oauthRedirectUri`, for the ten
+  // minutes between the redirect to Google and the callback. That single
+  // string is now carried in the OAuth `state` parameter — signed with
+  // JWT_SECRET and bound to a short-lived nonce cookie — so there is no
+  // server-side session state at all.
+  //
+  // Removing it fixes three things at once: the "MemoryStore is not designed
+  // for a production environment" warning on every boot, the loss of in-flight
+  // sign-ins whenever the instance restarts, and the fact that sessions in
+  // process memory would not survive running more than one instance.
   const hasGoogleConfig = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
 
   if (hasGoogleConfig) {
@@ -124,7 +112,6 @@ function initPassport(app) {
   }
 
   app.use(passport.initialize());
-  app.use(passport.session());
 }
 
 module.exports = { initPassport, upsertSocialUser };

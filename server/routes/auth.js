@@ -4,9 +4,9 @@
  *           reauth, recovery, reset-password, Google OAuth,
  *           and biometric register/verify/disable.
  *
- * OAuth deep-link fix for Expo Go:
+ * OAuth deep-link handling:
  *   The client passes ?redirectUri=<url> when initiating OAuth.
- *   That URL is stored in the server session so the callback can
+ *   That URL travels in the signed OAuth `state` parameter so the callback can
  *   redirect back to whatever scheme the client supports:
  *     - Expo Go:       exp://192.168.x.x:PORT/--/oauth/callback
  *     - Standalone:    career-assistant://oauth/callback
@@ -15,6 +15,8 @@
  */
 const express     = require("express");
 const passport    = require("passport");
+const crypto      = require("crypto");
+const jwt         = require("jsonwebtoken");
 const router      = express.Router();
 const AuthService = require("../services/authService");
 const { authenticate } = require("../middleware/authMiddleware");
@@ -186,6 +188,90 @@ router.post("/reset-password", authLimiter, async (req, res) => {
  *   - <APP_DEEP_LINK scheme>://... (standalone build, e.g. career-assistant://)
  *   - https://<origin in ALLOWED_ORIGINS>/... (web fallback)
  */
+// ─────────────────────────────────────────────────────────────────────────────
+// OAuth state
+//
+// The redirect URI used to live in req.session across the Google round trip,
+// which required express-session and its in-memory store: a warning on every
+// boot, in-flight sign-ins lost on restart, and no path to more than one
+// instance. It now travels in the OAuth `state` parameter instead.
+//
+// `state` is attacker-visible and attacker-modifiable, so it is a signed JWT
+// rather than a bare string — an unsigned redirect target here would hand the
+// victim's tokens to whoever crafted the link. The signature proves this
+// server issued it; the paired nonce cookie proves it was issued to *this*
+// browser, which is the CSRF protection the session cookie used to provide.
+// ─────────────────────────────────────────────────────────────────────────────
+const OAUTH_STATE_TTL_SEC = 600;            // 10 minutes, as the session was
+const OAUTH_NONCE_COOKIE  = "oauth_nonce";
+
+function buildOAuthState(redirectUri) {
+  const nonce = crypto.randomUUID();
+  const state = jwt.sign(
+    { redirectUri: redirectUri ?? null, nonce },
+    process.env.JWT_SECRET || "change_me_in_production",
+    { expiresIn: OAUTH_STATE_TTL_SEC, algorithm: "HS256" },
+  );
+  return { state, nonce };
+}
+
+function setNonceCookie(res, nonce) {
+  res.cookie(OAUTH_NONCE_COOKIE, nonce, {
+    httpOnly: true,
+    secure:   process.env.NODE_ENV === "production",
+    // "lax" so the cookie is still sent on the top-level GET navigation back
+    // from accounts.google.com. "strict" would drop it and break the flow.
+    sameSite: "lax",
+    maxAge:   OAUTH_STATE_TTL_SEC * 1000,
+    path:     "/api/auth",
+  });
+}
+
+/** Reads one cookie without pulling in cookie-parser for a single value. */
+function readCookie(req, name) {
+  const header = req.headers.cookie;
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    if (part.slice(0, idx).trim() === name) {
+      return decodeURIComponent(part.slice(idx + 1).trim());
+    }
+  }
+  return null;
+}
+
+/**
+ * Verifies the returned state and yields the redirect URI it carried.
+ * Returns null whenever anything fails, so the caller falls back to the
+ * default deep link rather than trusting an unverified destination.
+ */
+function redirectUriFromState(req) {
+  const state = req.query.state;
+  if (!state || typeof state !== "string") return null;
+
+  let payload;
+  try {
+    payload = jwt.verify(state, process.env.JWT_SECRET || "change_me_in_production");
+  } catch (e) {
+    console.warn("[OAuth] state rejected:", e.message);
+    return null;
+  }
+
+  // Binds the callback to the browser that started the flow.
+  const cookieNonce = readCookie(req, OAUTH_NONCE_COOKIE);
+  if (!cookieNonce || cookieNonce !== payload.nonce) {
+    console.warn("[OAuth] state nonce did not match the browser's cookie.");
+    return null;
+  }
+
+  // Re-checked even though it was validated before signing: the allow-list can
+  // change between issuing and returning, and this is the point where the
+  // value is actually used to deliver tokens.
+  if (!payload.redirectUri || !isAllowedRedirectUri(payload.redirectUri)) return null;
+  return payload.redirectUri;
+}
+
 /** Minimal HTML escaping for values echoed back into the error page. */
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => (
@@ -290,11 +376,18 @@ router.get("/google", (req, res, next) => {
         `If this is the web build, add its origin to <code>WEB_ORIGINS</code> on the server and try again.`
       ));
     }
-    req.session.oauthRedirectUri = req.query.redirectUri;
   }
+
+  const { state, nonce } = buildOAuthState(req.query.redirectUri);
+  setNonceCookie(res, nonce);
+
   passport.authenticate("google", {
-    session: true,
+    session: false,
     scope: ["openid", "profile", "email"],
+    // Passing `state` as a string makes passport-oauth2 forward it verbatim and
+    // skip its own session-backed state store entirely (see NullStore) — the
+    // verification above is ours.
+    state,
   })(req, res, next);
 });
 
@@ -310,21 +403,19 @@ router.get("/google", (req, res, next) => {
  * from the incoming URL inside the deep-link handler.
  */
 router.get("/google/callback",
-  // keepSessionInfo: true — Passport regenerates the session on login (session-fixation
-  // protection), which by default wipes req.session.oauthRedirectUri set in step 1.
-  // This option carries the pre-login session data across the regenerate.
-  passport.authenticate("google", { session: true, keepSessionInfo: true, failureRedirect: "/api/auth/oauth/error" }),
+  passport.authenticate("google", { session: false, failureRedirect: "/api/auth/oauth/error" }),
   async (req, res) => {
     try {
       const { accessToken, refreshToken, expiresAt } = await AuthService.issueSocialSession(req.user, req);
 
-      // Prefer the per-request redirect URI the client registered at step 1.
+      // Prefer the redirect URI the client registered at step 1, recovered
+      // from the signed state rather than from server-side session storage.
       const appDeepLink =
-        req.session.oauthRedirectUri ??
+        redirectUriFromState(req) ??
         `${process.env.APP_DEEP_LINK ?? "career-assistant://"}oauth/callback`;
 
-      // Clear it so it cannot be reused by a later OAuth flow.
-      delete req.session.oauthRedirectUri;
+      // One flow, one nonce.
+      res.clearCookie(OAUTH_NONCE_COOKIE, { path: "/api/auth" });
 
       // Build the redirect URL; handle trailing slashes consistently.
       const separator = appDeepLink.includes("?") ? "&" : "?";
@@ -332,8 +423,8 @@ router.get("/google/callback",
       res.redirect(redirectUrl);
     } catch (e) {
       console.error("[OAuth/Google] Session issue error:", e);
-      const fallback = req.session.oauthRedirectUri ?? `${process.env.APP_DEEP_LINK ?? "career-assistant://"}oauth/error`;
-      delete req.session.oauthRedirectUri;
+      const fallback = redirectUriFromState(req) ?? `${process.env.APP_DEEP_LINK ?? "career-assistant://"}oauth/error`;
+      res.clearCookie(OAUTH_NONCE_COOKIE, { path: "/api/auth" });
       res.redirect(fallback.includes("?") ? `${fallback}&error=auth_failed` : `${fallback}?error=auth_failed`);
     }
   }

@@ -49,8 +49,8 @@ Client (Expo / React Native)
 │   ├── authApiService.ts     — HTTP client (with retry + auto-refresh)
 │   ├── sessionManager.ts     — Secure token storage + 8-week session logic
 │   ├── biometricService.ts   — expo-local-authentication wrapper
-│   ├── otpService.ts         — Client-side OTP / TOTP utilities
-│   ├── riskScoring.ts        — Client-side risk assessment
+│   ├── riskScoring.ts        — Risk level types + scoring helpers
+│   ├── syncedStorage.ts      — Feature data, synced to MongoDB Atlas
 │   └── notificationService.ts — Push notification scheduling (Expo + FCM)
 └── components/auth/
     ├── OtpInput.tsx

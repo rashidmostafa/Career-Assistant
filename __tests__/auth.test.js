@@ -1,8 +1,14 @@
 /**
  * Comprehensive auth test suite — v2.
  *
- * Unit:        OtpService, RiskScoringService, SessionManager, BiometricService,
+ * Unit:        RiskScoringService, SessionManager, BiometricService,
  *              NotificationService
+ *
+ * OtpService was removed: it was a client-side simulation that stored TOTP
+ * secrets and backup codes in plaintext AsyncStorage and whose verifyTotp
+ * accepted any well-formed 6-digit code. Nothing imported it. The real
+ * implementation is server-side (speakeasy + User.totpSecret/backupCodes,
+ * both select:false in Atlas).
  * Server unit: AuthService (mocked DB), EmailService, SmsService
  * Integration: Full HTTP flows via supertest
  * Security:    Rate limiting, account lockout, token reuse, TOTP, backup codes
@@ -53,47 +59,6 @@ function mockMakeModel() {
 jest.mock("../server/models/User",     () => mockMakeModel());
 jest.mock("../server/models/Session",  () => mockMakeModel());
 jest.mock("../server/models/AuditLog", () => mockMakeModel());
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 1. OTP Service (client-side)
-// ─────────────────────────────────────────────────────────────────────────────
-describe("OtpService", () => {
-  let OtpService;
-
-  beforeAll(() => {
-    jest.mock("@react-native-async-storage/async-storage", () => ({
-      setItem:    jest.fn().mockResolvedValue(null),
-      getItem:    jest.fn().mockResolvedValue(null),
-      removeItem: jest.fn().mockResolvedValue(null),
-    }));
-    OtpService = require("../services/otpService").OtpService;
-  });
-
-  test("getTotpStepRemainingSecs returns a value between 0 and 30", () => {
-    const s = OtpService.getTotpStepRemainingSecs();
-    expect(s).toBeGreaterThanOrEqual(0);
-    expect(s).toBeLessThanOrEqual(30);
-  });
-
-  test("getOtpTtlSecs returns 600", () => {
-    expect(OtpService.getOtpTtlSecs()).toBe(600);
-  });
-
-  test("verifyTotp accepts a well-formed 6-digit code (client demo mode)", async () => {
-    const ok = await OtpService.verifyTotp("user1", "123456");
-    expect(ok).toBe(true);
-  });
-
-  test("verifyTotp rejects a malformed code", async () => {
-    const ok = await OtpService.verifyTotp("user1", "abc");
-    expect(ok).toBe(false);
-  });
-
-  test("verifyBackupCode returns false for an empty store", async () => {
-    const ok = await OtpService.verifyBackupCode("user1", "AAAA-BBBB");
-    expect(ok).toBe(false);
-  });
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. Risk Scoring Service
@@ -419,10 +384,19 @@ describe("HTTP Integration (supertest)", () => {
     AuditLog.create.mockResolvedValue({});
   });
 
-  test("GET /health → 200 with status ok", async () => {
+  test("GET /health → always 200, and reports database state", async () => {
     const res = await request(app).get("/health");
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe("ok");
+
+    // /health now distinguishes "the process is alive" from "its database is
+    // reachable". It answers 200 either way on purpose: Render restarts an
+    // instance whose health check fails, which cannot fix a Mongo outage and
+    // would just cycle the process. `status` and `db` are what monitoring
+    // alerts on. These models are mocked here, so no connection exists and
+    // "degraded" is the correct reading.
+    expect(res.body).toHaveProperty("db");
+    expect(["ok", "degraded"]).toContain(res.body.status);
+    expect(res.body.status).toBe(res.body.db === "connected" ? "ok" : "degraded");
   });
 
   test("GET /unknown-route → 404", async () => {
@@ -638,12 +612,6 @@ describe("Edge cases", () => {
     const entry = store.get(key);
     const expired = Date.now() > entry.expiresAt;
     expect(expired).toBe(true);
-  });
-
-  test("Empty backup code list returns 0 remaining", async () => {
-    const OtpService = require("../services/otpService").OtpService;
-    const remaining = await OtpService.getRemainingBackupCodes("no-such-user");
-    expect(remaining).toBe(0);
   });
 
   test("SessionManager urgency — none when session start is very recent", async () => {

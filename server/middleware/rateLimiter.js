@@ -1,7 +1,10 @@
 /**
- * Rate limiting middleware — express-rate-limit's built-in in-memory store.
- * Production: swap for a Redis-backed store so limits survive restarts and
- * work across multiple server instances.
+ * Rate limiting middleware — counters and IP blocks persisted in MongoDB.
+ *
+ * These used to live in process memory (express-rate-limit's default
+ * MemoryStore, and a plain Set for blocked IPs), which meant every deploy and
+ * every free-tier spin-down handed all clients a fresh budget and emptied the
+ * blocklist. See models/RateLimit.js.
  *
  * Limits (keyed by device ID when available, IP as fallback — see
  * rateLimitKey() below):
@@ -11,6 +14,8 @@
  *  - AI proxy:  60 requests / hour
  */
 const { rateLimit } = require("express-rate-limit");
+const RateLimit = require("../models/RateLimit");
+const { MongoRateLimitStore } = require("./mongoRateLimitStore");
 
 // Mobile carriers commonly rotate the client's visible public IP mid-session
 // (CGNAT) — keying purely on req.ip let a single device silently get a fresh
@@ -25,6 +30,7 @@ function rateLimitKey(req, prefix = "") {
 }
 
 const authLimiter = rateLimit({
+  store: new MongoRateLimitStore({ prefix: "auth" }),
   windowMs: 60 * 60 * 1000, // 1 hour
   // 20, not 10. This budget is pooled across register, login, verify-email,
   // resend-verification, 2fa/verify, 2fa/resend, reset-password and
@@ -43,6 +49,7 @@ const authLimiter = rateLimit({
 });
 
 const recoveryLimiter = rateLimit({
+  store: new MongoRateLimitStore({ prefix: "recovery" }),
   windowMs: 24 * 60 * 60 * 1000, // 24 hours
   max: 3,
   message: { message: "Too many recovery attempts. Please try again tomorrow." },
@@ -53,6 +60,7 @@ const recoveryLimiter = rateLimit({
 });
 
 const generalLimiter = rateLimit({
+  store: new MongoRateLimitStore({ prefix: "general" }),
   windowMs: 60 * 60 * 1000,
   max: 100,
   message: { message: "Too many requests. Please slow down." },
@@ -68,6 +76,7 @@ const generalLimiter = rateLimit({
 // working through a CV analysis plus a roadmap regeneration could exhaust the
 // budget that /api/auth/refresh needs to keep them signed in. Separate bucket.
 const aiLimiter = rateLimit({
+  store: new MongoRateLimitStore({ prefix: "ai" }),
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 60,
   message: { message: "Too many AI requests. Please try again shortly." },
@@ -77,27 +86,59 @@ const aiLimiter = rateLimit({
   skip: (req) => process.env.NODE_ENV === "test",
 });
 
-// IP blocking (in-memory; production: use Redis SET with TTL)
+// ── IP blocking ──────────────────────────────────────────────────────────────
+// Blocks are stored in MongoDB so they survive restarts, but the middleware
+// reads from an in-process cache: this runs on every request, and a database
+// round trip per request to answer "is this IP blocked?" would cost more than
+// the protection is worth. The cache is loaded at boot and refreshed on an
+// interval, so a block placed by another instance takes effect within one
+// refresh rather than instantly — an acceptable trade for a control that
+// exists to blunt sustained abuse, not to win a race.
+const BLOCK_PREFIX       = "block";
+const BLOCK_REFRESH_MS   = 30_000;
 const blockedIPs = new Set();
-const blockExpiry = new Map();
 
-function blockIP(ip, durationMs = 60 * 60 * 1000) {
-  blockedIPs.add(ip);
-  blockExpiry.set(ip, Date.now() + durationMs);
+async function refreshBlockedIPs() {
+  try {
+    const docs = await RateLimit.find({
+      key: new RegExp(`^${BLOCK_PREFIX}:`),
+      resetAt: { $gt: new Date() },
+    }).select("key").lean();
+
+    blockedIPs.clear();
+    for (const d of docs) blockedIPs.add(d.key.slice(BLOCK_PREFIX.length + 1));
+  } catch (e) {
+    // Keep serving with the cache we have rather than failing open on a blip.
+    console.warn("[RateLimit] Could not refresh IP blocklist:", e.message);
+  }
+}
+
+function startBlocklistSync() {
+  refreshBlockedIPs();
+  const timer = setInterval(refreshBlockedIPs, BLOCK_REFRESH_MS);
+  if (typeof timer.unref === "function") timer.unref();
+  return timer;
+}
+
+async function blockIP(ip, durationMs = 60 * 60 * 1000) {
+  blockedIPs.add(ip);   // effective immediately on this instance
+  try {
+    await RateLimit.findOneAndUpdate(
+      { key: `${BLOCK_PREFIX}:${ip}` },
+      { $set: { resetAt: new Date(Date.now() + durationMs) }, $setOnInsert: { hits: 0 } },
+      { upsert: true },
+    );
+  } catch (e) {
+    console.error("[RateLimit] Failed to persist IP block:", e.message);
+  }
 }
 
 function ipBlockMiddleware(req, res, next) {
   const ip = req.ip ?? "unknown";
   if (blockedIPs.has(ip)) {
-    const expiry = blockExpiry.get(ip);
-    if (expiry && Date.now() > expiry) {
-      blockedIPs.delete(ip);
-      blockExpiry.delete(ip);
-    } else {
-      return res.status(429).json({ message: "Your IP has been temporarily blocked due to suspicious activity." });
-    }
+    return res.status(429).json({ message: "Your IP has been temporarily blocked due to suspicious activity." });
   }
   next();
 }
 
-module.exports = { authLimiter, recoveryLimiter, generalLimiter, aiLimiter, ipBlockMiddleware, blockIP };
+module.exports = { authLimiter, recoveryLimiter, generalLimiter, aiLimiter, ipBlockMiddleware, blockIP, startBlocklistSync };

@@ -25,7 +25,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { OtpInput } from "@/components/auth/OtpInput";
-import { RiskScoringService } from "@/services/riskScoring";
 import { SessionManager } from "@/services/sessionManager";
 import type { RiskLevel } from "@/services/riskScoring";
 import { showAlert } from "@/utils/alert";

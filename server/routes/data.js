@@ -37,7 +37,7 @@ function payloadTooLarge(payload) {
 // Deliberately excludes payloads. The client calls this on sign-in to decide
 // what it actually needs to download, which matters on a slow connection and
 // on a cold Render instance.
-router.get("/", authenticate, async (req, res) => {
+router.get("/", authenticate, async (req, res, next) => {
   try {
     const docs = await UserData.find({ userId: req.userId })
       .select("namespace revision updatedAt")
@@ -50,7 +50,7 @@ router.get("/", authenticate, async (req, res) => {
       })),
     });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 
@@ -58,7 +58,7 @@ router.get("/", authenticate, async (req, res) => {
 // The app finishes onboarding with five namespaces to push at once. Sending
 // them individually against a spun-down free-tier instance meant five
 // sequential cold-start-length waits; this makes it one.
-router.post("/bulk", authenticate, async (req, res) => {
+router.post("/bulk", authenticate, async (req, res, next) => {
   try {
     const { items } = req.body ?? {};
     if (!Array.isArray(items) || items.length === 0) {
@@ -93,12 +93,12 @@ router.post("/bulk", authenticate, async (req, res) => {
 
     res.json({ saved });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 
 // ─── Read one ─────────────────────────────────────────────────────────────────
-router.get("/:namespace", authenticate, async (req, res) => {
+router.get("/:namespace", authenticate, async (req, res, next) => {
   try {
     const { namespace } = req.params;
     if (invalidNamespace(namespace)) {
@@ -116,12 +116,12 @@ router.get("/:namespace", authenticate, async (req, res) => {
       updatedAt: doc.updatedAt,
     });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 
 // ─── Write one ────────────────────────────────────────────────────────────────
-router.put("/:namespace", authenticate, async (req, res) => {
+router.put("/:namespace", authenticate, async (req, res, next) => {
   try {
     const { namespace } = req.params;
     if (invalidNamespace(namespace)) {
@@ -143,12 +143,12 @@ router.put("/:namespace", authenticate, async (req, res) => {
 
     res.json({ namespace, revision: doc.revision, updatedAt: doc.updatedAt });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 
 // ─── Delete one ───────────────────────────────────────────────────────────────
-router.delete("/:namespace", authenticate, async (req, res) => {
+router.delete("/:namespace", authenticate, async (req, res, next) => {
   try {
     const { namespace } = req.params;
     if (invalidNamespace(namespace)) {
@@ -157,7 +157,7 @@ router.delete("/:namespace", authenticate, async (req, res) => {
     await UserData.deleteOne({ userId: req.userId, namespace });
     res.json({ message: "Deleted." });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 

@@ -12,17 +12,17 @@ const AuthService = require("../services/authService");
 const { authenticate } = require("../middleware/authMiddleware");
 
 // ─── Profile ──────────────────────────────────────────────────────────────────
-router.get("/profile", authenticate, async (req, res) => {
+router.get("/profile", authenticate, async (req, res, next) => {
   try {
     const user = await User.findById(req.userId).select("+backupCodes");
     if (!user) return res.status(404).json({ message: "User not found." });
     res.json({ user: user.toSafeObject() });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 
-router.patch("/profile", authenticate, async (req, res) => {
+router.patch("/profile", authenticate, async (req, res, next) => {
   try {
     const allowed = ["name", "phone", "targetRole", "targetRoles", "activeRoleId", "experienceLevel", "background", "photoUri", "onboardingComplete"];
     const update = {};
@@ -33,12 +33,12 @@ router.patch("/profile", authenticate, async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found." });
     res.json({ user: user.toSafeObject() });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 
 // ─── Security questions ───────────────────────────────────────────────────────
-router.post("/security-questions", authenticate, async (req, res) => {
+router.post("/security-questions", authenticate, async (req, res, next) => {
   try {
     const result = await AuthService.setSecurityQuestions(req.userId, req.body.questions, req);
     res.json(result);
@@ -47,31 +47,31 @@ router.post("/security-questions", authenticate, async (req, res) => {
   }
 });
 
-router.get("/security-questions", authenticate, async (req, res) => {
+router.get("/security-questions", authenticate, async (req, res, next) => {
   try {
     const user = await User.findById(req.userId).select("+securityQuestions");
     if (!user) return res.status(404).json({ message: "User not found." });
     const questions = (user.securityQuestions ?? []).map((q) => q.question);
     res.json({ questions });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 
 // ─── Push token registration ──────────────────────────────────────────────────
-router.post("/push-token", authenticate, async (req, res) => {
+router.post("/push-token", authenticate, async (req, res, next) => {
   try {
     const { pushToken } = req.body;
     if (!pushToken) return res.status(400).json({ message: "pushToken required." });
     await User.findByIdAndUpdate(req.userId, { pushToken });
     res.json({ message: "Push token registered." });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 
 // ─── GDPR: data export ────────────────────────────────────────────────────────
-router.get("/export", authenticate, async (req, res) => {
+router.get("/export", authenticate, async (req, res, next) => {
   try {
     const format = req.query.format === "csv" ? "csv" : "json";
     const user = await User.findById(req.userId).select("+securityQuestions");
@@ -154,22 +154,22 @@ router.get("/export", authenticate, async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="career-assistant-data-${Date.now()}.csv"`);
     return res.send(profileRow);
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 
 // ─── GDPR: consent ───────────────────────────────────────────────────────────
-router.post("/consent", authenticate, async (req, res) => {
+router.post("/consent", authenticate, async (req, res, next) => {
   try {
     await User.findByIdAndUpdate(req.userId, { consentGiven: true, consentAt: new Date() });
     res.json({ message: "Consent recorded." });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 
 // ─── GDPR: account deletion ───────────────────────────────────────────────────
-router.post("/delete", authenticate, async (req, res) => {
+router.post("/delete", authenticate, async (req, res, next) => {
   try {
     const scheduledAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30-day grace
     await User.findByIdAndUpdate(req.userId, { deletionScheduledAt: scheduledAt });
@@ -179,11 +179,11 @@ router.post("/delete", authenticate, async (req, res) => {
     try { await AuditLog.create({ userId: req.userId, event: "deletion_requested", success: true, ipAddress: req.ip }); } catch (_) {}
     res.json({ message: "Account scheduled for deletion in 30 days.", scheduledAt: scheduledAt.getTime() });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 
-router.post("/delete/cancel", authenticate, async (req, res) => {
+router.post("/delete/cancel", authenticate, async (req, res, next) => {
   try {
     await User.findByIdAndUpdate(req.userId, {
       $unset: { deletionScheduledAt: 1 },
@@ -191,12 +191,12 @@ router.post("/delete/cancel", authenticate, async (req, res) => {
     });
     res.json({ message: "Account deletion cancelled." });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────
-router.get("/sessions", authenticate, async (req, res) => {
+router.get("/sessions", authenticate, async (req, res, next) => {
   try {
     const sessions = await Session.find({
       userId: req.userId,
@@ -207,11 +207,11 @@ router.get("/sessions", authenticate, async (req, res) => {
       .sort({ lastRefreshedAt: -1 });
     res.json({ sessions });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 
-router.delete("/sessions/:sessionId", authenticate, async (req, res) => {
+router.delete("/sessions/:sessionId", authenticate, async (req, res, next) => {
   try {
     const result = await Session.findOneAndUpdate(
       { _id: req.params.sessionId, userId: req.userId },
@@ -220,12 +220,12 @@ router.delete("/sessions/:sessionId", authenticate, async (req, res) => {
     if (!result) return res.status(404).json({ message: "Session not found." });
     res.json({ message: "Session revoked." });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 
 // ─── Audit log ────────────────────────────────────────────────────────────────
-router.get("/audit-log", authenticate, async (req, res) => {
+router.get("/audit-log", authenticate, async (req, res, next) => {
   try {
     const page  = Math.max(parseInt(req.query.page ?? "1"), 1);
     const limit = Math.min(parseInt(req.query.limit ?? "20"), 100);
@@ -237,7 +237,7 @@ router.get("/audit-log", authenticate, async (req, res) => {
     const total = await AuditLog.countDocuments({ userId: req.userId });
     res.json({ logs, page, limit, total });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    next(e);
   }
 });
 
