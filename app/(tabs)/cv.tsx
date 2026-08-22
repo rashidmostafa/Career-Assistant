@@ -37,7 +37,7 @@ import { ScoreRing } from "@/components/ScoreRing";
 import { useCV, ATSBreakdown } from "@/context/CVContext";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { extractPdfTextFromBase64, diagnosePdf } from "@/utils/pdfExtract";
+import { extractPdfTextFromBase64, diagnosePdf, readabilityScore } from "@/utils/pdfExtract";
 import { toByteArray } from "base64-js";
 import { showAlert } from "@/utils/alert";
 import { RoleSwitcher } from "@/components/RoleSwitcher";
@@ -123,6 +123,20 @@ export default function CVScreen() {
 
       if (!extractedText || extractedText.trim().length < 40) {
         setPdfError("Couldn't read text from this PDF. Please upload a text-based PDF (not a scanned image).");
+        setIsPickingPdf(false);
+        return;
+      }
+
+      // Length alone is not enough: a PDF using an embedded subset font with no
+      // ToUnicode map decodes to long runs of meaningless characters, which
+      // used to be sent to the model and returned as a nonsense "rewritten CV".
+      const quality = readabilityScore(extractedText);
+      if (!quality.ok) {
+        if (__DEV__) console.log("[pdfExtract] rejected as unreadable", quality);
+        setPdfError(
+          "This PDF's text didn't decode into readable words — it's likely a scan or uses embedded fonts. " +
+          "Try exporting it again from Word or Google Docs, or paste your CV text instead."
+        );
         setIsPickingPdf(false);
         return;
       }

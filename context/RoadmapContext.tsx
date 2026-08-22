@@ -1,6 +1,8 @@
 // Device storage that also syncs to the account, so this context's state
 // survives a reinstall and follows the user to a new phone. Same API.
 import AsyncStorage from "@/services/syncedStorage";
+import { chatJSON, isAIConfigured } from "@/services/aiClient";
+import { useCV } from "@/context/CVContext";
 import React, {
   createContext,
   useCallback,
@@ -286,6 +288,99 @@ export function daysUntil(deadlineDate: string): number {
   return Math.ceil((new Date(deadlineDate).getTime() - Date.now()) / 86_400_000);
 }
 
+// ─── AI-generated plan ────────────────────────────────────────────────────────
+/**
+ * Builds the week list from the candidate's actual CV and target role.
+ *
+ * The roadmap used to come from getTemplate(role): four hand-written templates
+ * of six weeks each, plus two career extras, so every plan was exactly eight
+ * weeks and any role outside those four got a generic default. The skill gaps
+ * were passed into generateRoadmap and then ignored — the parameter was even
+ * named `_skillGaps`. Two people with the same target role and completely
+ * different CVs received identical plans.
+ *
+ * The length is deliberately not fixed. Someone missing one framework needs a
+ * few weeks; someone changing discipline needs far more, and padding the first
+ * or truncating the second is what made the old output feel canned.
+ *
+ * Returns null when unavailable or malformed, and the caller falls back to the
+ * templates — the same contract every other AI call in this app uses.
+ */
+const LEVELS = ["Beginner", "Intermediate", "Advanced"] as const;
+const RESOURCE_TYPES = ["video", "article", "course"] as const;
+
+function sanitizeWeeks(raw: any): WeekTemplate[] | null {
+  const list = Array.isArray(raw?.weeks) ? raw.weeks : null;
+  if (!list?.length) return null;
+
+  const weeks = list.slice(0, 16).map((w: any): WeekTemplate | null => {
+    const topic = typeof w?.topic === "string" ? w.topic.trim() : "";
+    if (!topic) return null;
+    const tasks = Array.isArray(w?.tasks)
+      ? w.tasks.filter((t: any) => typeof t === "string" && t.trim()).slice(0, 6)
+      : [];
+    const resources = Array.isArray(w?.resources)
+      ? w.resources
+          .filter((r: any) => typeof r?.title === "string" && typeof r?.url === "string")
+          .slice(0, 4)
+          .map((r: any) => ({
+            title: r.title,
+            url: r.url,
+            type: RESOURCE_TYPES.includes(r.type) ? r.type : "article",
+          }))
+      : [];
+    return {
+      topic,
+      description: typeof w?.description === "string" ? w.description : "",
+      level: LEVELS.includes(w?.level) ? w.level : "Intermediate",
+      tasks: tasks.length ? tasks : ["Study the core concepts", "Build something with it", "Review and take notes"],
+      resources,
+    };
+  }).filter(Boolean) as WeekTemplate[];
+
+  return weeks.length ? weeks : null;
+}
+
+async function generatePlanWithAI(opts: {
+  role: string;
+  experienceLevel: string;
+  gaps: string[];
+  cvSkills: string[];
+  cvText: string;
+}): Promise<WeekTemplate[] | null> {
+  if (!isAIConfigured) return null;
+  const { role, experienceLevel, gaps, cvSkills, cvText } = opts;
+
+  const prompt = `You are building a personalised learning roadmap for a candidate.
+
+TARGET ROLE: ${role}
+STATED EXPERIENCE LEVEL: ${experienceLevel}
+SKILLS THE CANDIDATE ALREADY HAS (from their CV): ${cvSkills.length ? cvSkills.join(", ") : "unknown"}
+KNOWN GAPS FOR THIS ROLE: ${gaps.length ? gaps.join(", ") : "infer them from the CV and target role"}
+
+CV EXCERPT:
+${(cvText || "No CV text supplied.").slice(0, 4000)}
+
+Produce a roadmap that closes the distance between this specific CV and this specific target role.
+
+Rules:
+- Do NOT teach what the candidate already demonstrably knows. Skip it entirely.
+- Choose the NUMBER of weeks based on how large the real gap is: as few as 3 if they are nearly ready, as many as 16 for a career change. Do not default to a round number.
+- Order weeks so each builds on the previous one.
+- "level" must be exactly one of: Beginner, Intermediate, Advanced.
+- Every resource URL must be a real, well-known, currently live page (official docs, freeCodeCamp, MDN, Coursera and similar). Never invent a URL.
+- 3 to 5 concrete, checkable tasks per week.
+
+Return ONLY JSON:
+{"weeks":[{"topic":"string","description":"string","level":"Beginner|Intermediate|Advanced","tasks":["string"],"resources":[{"title":"string","url":"string","type":"video|article|course"}]}]}`;
+
+  try {
+    return sanitizeWeeks(await chatJSON(prompt));
+  } catch {
+    return null;
+  }
+}
+
 function buildWeeks(templates: WeekTemplate[], track: "job" | "career", startWeek = 1): RoadmapWeek[] {
   let prevIds: string[] = [];
   return templates.map((t, i) => {
@@ -313,6 +408,8 @@ function buildWeeks(templates: WeekTemplate[], track: "job" | "career", startWee
 const RoadmapContext = createContext<RoadmapState | null>(null);
 
 export function RoadmapProvider({ children }: { children: React.ReactNode }) {
+  // The roadmap is only meaningful against the candidate's actual CV.
+  const { cvProfile } = useCV();
   const { user } = useAuth();
   // Every stored key is scoped to the active role: two target roles mean two
   // independent roadmaps, and without this the second would overwrite the first.
@@ -433,15 +530,28 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
   // ── Generate ─────────────────────────────────────────────────────────────────
   const generateRoadmap = useCallback(
     async (
-      _skillGaps: string[],
+      skillGaps: string[],
       role: string,
-      _experienceLevel = "Intermediate",
+      experienceLevel = "Intermediate",
       jobDeadline?: { jobId: string; jobTitle: string; company: string; deadlineDate: string }
     ) => {
       if (!user) return;
       setIsGenerating(true);
       try {
-        const jobWeeks = buildWeeks(getTemplate(role), "job", 1);
+        // Ask for a plan built from this CV and this role. Its length reflects
+        // the size of the real gap rather than a fixed six-week template.
+        const aiWeeks = await generatePlanWithAI({
+          role,
+          experienceLevel,
+          gaps: skillGaps ?? [],
+          cvSkills: cvProfile?.skills ?? [],
+          cvText: cvProfile?.rawText ?? "",
+        });
+
+        const jobWeeks = buildWeeks(aiWeeks ?? getTemplate(role), "job", 1);
+        // The career track stays template-driven on purpose: communication,
+        // open-source contribution and portfolio work do not vary by target
+        // role the way technical gaps do.
         const careerWeeks = buildWeeks(CAREER_EXTRAS, "career", jobWeeks.length + 1);
         const allWeeks = [...jobWeeks, ...careerWeeks];
 

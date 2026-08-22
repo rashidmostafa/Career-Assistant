@@ -620,3 +620,32 @@ export function diagnosePdf(bytes: Uint8Array): Record<string, unknown> {
     extractedTextPreview: text.slice(0, 300),
   };
 }
+
+/**
+ * Whether extracted text is prose a human wrote, rather than decoding debris.
+ *
+ * PDF text extraction is a best-effort decode: with an embedded subset font or
+ * a missing ToUnicode map, the bytes come back as plausible-looking but
+ * meaningless characters. The only guard before this was a length check, so a
+ * long enough run of garbage passed straight through, got sent to the model,
+ * and came back as a "rewritten CV" full of nonsense.
+ *
+ * Two independent signals, because either alone has a blind spot: a page of
+ * "!!!!!!" is all valid characters but no words, while a page of accented
+ * mojibake can form word-shaped tokens out of characters prose never uses.
+ */
+export function readabilityScore(text: string): { sane: number; wordish: number; ok: boolean } {
+  const t = (text ?? "").replace(/\s+/g, " ").trim();
+  if (t.length < 40) return { sane: 0, wordish: 0, ok: false };
+
+  const saneChars = t.match(/[A-Za-z0-9 .,;:'"()\-@/&+#%$!?\n]/g)?.length ?? 0;
+  const sane = saneChars / t.length;
+
+  const tokens = t.split(" ").filter(Boolean);
+  const words = tokens.filter((w) => /^[A-Za-z][A-Za-z'’-]{1,}$/.test(w)).length;
+  const wordish = tokens.length ? words / tokens.length : 0;
+
+  // A real CV is overwhelmingly ordinary characters and mostly real words, even
+  // allowing for dates, bullets, emails and version numbers.
+  return { sane, wordish, ok: sane >= 0.85 && wordish >= 0.45 };
+}

@@ -342,7 +342,9 @@ function generateFallbackCV(rawText: string, format: string, role: string, name:
   const projectsBlock = projects || missing("projects");
   const summaryBlock = summary || `Results-driven ${role} with a track record of delivering measurable impact.`;
 
-  const footer = "\n\n---\nGenerated from your uploaded CV. Connect an OpenAI API key for a fully AI-rewritten version with all suggestions applied.";
+  // The old text told the user to "connect an OpenAI API key", which they
+  // cannot do -- the key lives on the server now. Say what actually happened.
+  const footer = "\n\n---\nStructured directly from your uploaded CV. The AI rewrite was unavailable, so this keeps your original wording rather than inventing content; try again shortly for the fully rewritten version.";
 
   if (format === "MIT") {
     // MIT CAPD order: Header → Education → Technical Skills → Projects → Experience → Activities.

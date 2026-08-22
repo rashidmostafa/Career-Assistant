@@ -105,6 +105,26 @@ function normalizePortfolio(value: unknown): Portfolio | null {
   };
 }
 
+/**
+ * github.com and codeforces.com are third-party hosts on the far side of a
+ * mobile connection; neither request had any deadline, so a rate-limited or
+ * unreachable host left the promise pending forever.
+ *
+ * Built from AbortController rather than AbortSignal.timeout, which React
+ * Native's polyfill does not provide.
+ */
+const METRICS_TIMEOUT_MS = 10000;
+
+async function fetchWithTimeout(url: string, ms = METRICS_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
@@ -141,10 +161,10 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const syncGithub = async (username: string) => {
     setIsSyncing(true);
     try {
-      const res = await fetch(`https://api.github.com/users/${username}`);
+      const res = await fetchWithTimeout(`https://api.github.com/users/${username}`);
       if (!res.ok) throw new Error("GitHub user not found");
       const data = await res.json();
-      const reposRes = await fetch(`https://api.github.com/users/${username}/repos?per_page=100`);
+      const reposRes = await fetchWithTimeout(`https://api.github.com/users/${username}/repos?per_page=100`);
       const repos = await reposRes.json();
       const stars = Array.isArray(repos)
         ? repos.reduce((acc: number, r: { stargazers_count: number }) => acc + r.stargazers_count, 0)
@@ -184,7 +204,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const syncCodeforces = async (handle: string) => {
     setIsSyncing(true);
     try {
-      const res = await fetch(`https://codeforces.com/api/user.info?handles=${handle}`);
+      const res = await fetchWithTimeout(`https://codeforces.com/api/user.info?handles=${handle}`);
       const data = await res.json();
       if (data.status !== "OK") throw new Error("Codeforces handle not found");
       const info = data.result[0];
@@ -252,13 +272,18 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     await save({ ...base, links: [...base.links, link], updatedAt: new Date().toISOString() });
 
     // GitHub and Codeforces expose public stats, so a link to either can carry
-    // live numbers rather than sitting there as a bare shortcut. Best-effort:
-    // a rate-limited or private profile must not block adding the link.
-    try {
-      if (platform.id === "github") await syncGithub(link.label);
-      else if (platform.id === "codeforces") await syncCodeforces(link.label);
-    } catch {
-      /* card still works without metrics */
+    // live numbers rather than sitting there as a bare shortcut.
+    //
+    // Deliberately not awaited. The link is already saved above; awaiting the
+    // metrics meant addLink did not resolve until two GitHub API calls came
+    // back, so the caller's `setAdding(false)` never ran and the add sheet
+    // stayed open on top of the list — the card had in fact been created, but
+    // the sheet was covering it, which read as "adding a link does nothing".
+    // The metrics land in their own state update whenever they arrive.
+    if (platform.id === "github") {
+      void syncGithub(link.label).catch(() => { /* card works without metrics */ });
+    } else if (platform.id === "codeforces") {
+      void syncCodeforces(link.label).catch(() => { /* card works without metrics */ });
     }
   };
 
