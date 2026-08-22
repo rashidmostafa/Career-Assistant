@@ -10,7 +10,7 @@
  * rateLimitKey() below):
  *  - Auth endpoints: 20 requests / hour
  *  - Recovery:  3 attempts / day
- *  - General:   100 requests / hour
+ *  - General:   1000 requests / hour
  *  - AI proxy:  60 requests / hour
  */
 const { rateLimit } = require("express-rate-limit");
@@ -62,7 +62,18 @@ const recoveryLimiter = rateLimit({
 const generalLimiter = rateLimit({
   store: new MongoRateLimitStore({ prefix: "general" }),
   windowMs: 60 * 60 * 1000,
-  max: 100,
+  // 1000, not 100. This is a blanket ceiling across every /api route, and 100
+  // was set when the API only served auth. It is now also carrying profile
+  // loads, sign-in hydration, and a write for every roadmap tick, CV edit and
+  // job application — a single testing session reached 184 within the hour.
+  //
+  // It was survivable before only because the counter lived in memory and was
+  // wiped by each restart; persisting it exposed how low the number was.
+  //
+  // This limiter exists to stop a firehose, not to police behaviour: the
+  // controls that matter are authLimiter (20/hour), aiLimiter (60/hour) and
+  // account lockout after 5 failed passwords, all of which stay where they are.
+  max: 1000,
   message: { message: "Too many requests. Please slow down." },
   standardHeaders: true,
   legacyHeaders: false,

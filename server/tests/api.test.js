@@ -108,6 +108,18 @@ describe("/api/data", () => {
     expect(be.body.payload.weeks).toBe(8);
   });
 
+  it("returns every payload in one request with ?payloads=1", async () => {
+    // Sign-in hydration used to fetch the manifest and then each namespace
+    // separately, so a single sign-in cost 1+N requests and 1+N counts against
+    // the rate limit. Guards that it stays one request.
+    const res = await auth(request(app).get("/api/data?payloads=1"));
+    expect(res.status).toBe(200);
+    expect(res.body.namespaces.length).toBeGreaterThanOrEqual(3);
+    for (const entry of res.body.namespaces) {
+      expect(entry).toHaveProperty("payload");
+    }
+  });
+
   it("omits payloads from the manifest", async () => {
     const res = await auth(request(app).get("/api/data"));
     expect(res.body.namespaces.length).toBeGreaterThanOrEqual(3);

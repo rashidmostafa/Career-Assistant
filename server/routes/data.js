@@ -34,19 +34,29 @@ function payloadTooLarge(payload) {
 }
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────
-// Deliberately excludes payloads. The client calls this on sign-in to decide
-// what it actually needs to download, which matters on a slow connection and
-// on a cold Render instance.
+// Without ?payloads=1 this lists namespaces and revisions only, which is what a
+// client wants when deciding whether anything changed.
+//
+// With ?payloads=1 it returns the full contents in one response. That exists
+// because sign-in hydration needs everything: fetching the manifest and then
+// one request per namespace turned a single sign-in into 1+N round trips,
+// which on a cold Render instance is 1+N cold-start waits and, less obviously,
+// 1+N counts against the request rate limit. The bytes are identical either
+// way; only the number of requests changes.
 router.get("/", authenticate, async (req, res, next) => {
   try {
+    const withPayloads = req.query.payloads === "1";
+
     const docs = await UserData.find({ userId: req.userId })
-      .select("namespace revision updatedAt")
+      .select(withPayloads ? "namespace revision updatedAt payload" : "namespace revision updatedAt")
       .lean();
+
     res.json({
       namespaces: docs.map((d) => ({
         namespace: d.namespace,
         revision:  d.revision,
         updatedAt: d.updatedAt,
+        ...(withPayloads ? { payload: d.payload } : {}),
       })),
     });
   } catch (e) {

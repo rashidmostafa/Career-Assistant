@@ -197,29 +197,24 @@ const syncedStorage = {
   async hydrate(): Promise<{ pulled: number; failed: boolean }> {
     if (!(await canSync())) return { pulled: 0, failed: false };
     try {
-      const manifest = await apiFetch<{ namespaces: { namespace: string }[] }>(
-        "/api/data",
+      // One request, not one per namespace. The earlier version fetched the
+      // manifest and then each namespace separately, so a sign-in cost 1+N
+      // round trips — and counted 1+N times against the server's request rate
+      // limit, which a normal testing session could exhaust on its own.
+      const res = await apiFetch<{ namespaces: { namespace: string; payload?: any }[] }>(
+        "/api/data?payloads=1",
         { timeoutMs: SYNC_TIMEOUT_MS },
         true,
       );
 
       let pulled = 0;
-      for (const entry of manifest?.namespaces ?? []) {
-        try {
-          const res = await apiFetch<{ payload: any }>(
-            `/api/data/${entry.namespace}`,
-            { timeoutMs: SYNC_TIMEOUT_MS },
-            true,
-          );
-          const key = res?.payload?.key;
-          const value = decode(res?.payload);
-          if (typeof key === "string" && value !== null) {
-            await AsyncStorage.setItem(key, value);
-            await rememberKey(key);
-            pulled++;
-          }
-        } catch {
-          // One unreadable namespace must not abandon the rest.
+      for (const entry of res?.namespaces ?? []) {
+        const key = entry.payload?.key;
+        const value = decode(entry.payload);
+        if (typeof key === "string" && value !== null) {
+          await AsyncStorage.setItem(key, value);
+          await rememberKey(key);
+          pulled++;
         }
       }
       return { pulled, failed: false };
