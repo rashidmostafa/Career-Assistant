@@ -35,6 +35,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ScoreRing } from "@/components/ScoreRing";
 import { useCV, ATSBreakdown } from "@/context/CVContext";
+import { useRoadmap } from "@/context/RoadmapContext";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { extractPdfTextFromBase64, diagnosePdf, readabilityScore } from "@/utils/pdfExtract";
@@ -69,6 +70,7 @@ export default function CVScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { cvProfile, isAnalyzing, analyzeCV, clearCV } = useCV();
+  const { generateRoadmap } = useRoadmap();
   const [activeTab, setActiveTab] = useState<"input" | "result">("input");
   const [selectedFormat, setSelectedFormat] = useState<CVFormat>("Harvard");
   const [isCopied, setIsCopied] = useState(false);
@@ -142,6 +144,17 @@ export default function CVScreen() {
       }
 
       await analyzeCV(extractedText, selectedFormat);
+
+      // A roadmap generated before this CV existed cannot reflect it, and
+      // nothing re-ran generation after an upload — which is why uploading a
+      // new CV appeared to change nothing. Detached on purpose: the CV results
+      // should not wait on a second model call.
+      void generateRoadmap(
+        [],
+        user?.targetRole || "Frontend Developer",
+        user?.experienceLevel || "Intermediate",
+      ).catch(() => { /* roadmap tab keeps its previous plan */ });
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setExpandedSuggestion(0);
       setActiveTab("result");

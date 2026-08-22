@@ -2,7 +2,7 @@
 // survives a reinstall and follows the user to a new phone. Same API.
 import AsyncStorage from "@/services/syncedStorage";
 import { detectPlatform, deriveLabel, isValidUrl, normalizeUrl } from "@/constants/portfolioPlatforms";
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useAuth } from "./AuthContext";
 
 export interface GithubMetrics {
@@ -130,6 +130,15 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // Every async action here reads the portfolio to build its next version, and
+  // reading it from the render closure meant reading whatever it was when the
+  // action started. syncGithub is the case that bit: it is kicked off straight
+  // after a link is added, so its closure still held the pre-link portfolio
+  // (usually null) and it saved `{ ...base, github }` with `links: []` — wiping
+  // the link that had just been added. The card appeared and then vanished.
+  const portfolioRef = useRef<Portfolio | null>(null);
+  useEffect(() => { portfolioRef.current = portfolio; }, [portfolio]);
+
   const load = useCallback(async () => {
     if (!user) { setPortfolio(null); return; }
     try {
@@ -155,6 +164,9 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     if (!user) throw new Error("You are signed out. Sign in and try again.");
     if (!normalized) throw new Error("Could not save the portfolio — its stored data looks corrupted.");
     await AsyncStorage.setItem(`portfolio_${user.id}`, JSON.stringify(normalized));
+    // Updated before the state set so a second action starting in the same tick
+    // still sees this write.
+    portfolioRef.current = normalized;
     setPortfolio(normalized);
   };
 
@@ -187,8 +199,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
         commits: Math.floor(Math.random() * 500) + 100,
         topLanguages,
       };
-      const base: Portfolio = portfolio || {
-        id: Date.now().toString(),
+      const base: Portfolio = portfolioRef.current || {
+        id: `portfolio_${user!.id}`,
         userId: user!.id,
         github: null,
         codeforces: null,
@@ -229,7 +241,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
         solved,
         rank: info.rank || "unrated",
       };
-      const base: Portfolio = portfolio || {
+      const base: Portfolio = portfolioRef.current || {
         id: Date.now().toString(),
         userId: user!.id,
         github: null,
@@ -249,7 +261,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     const url = normalizeUrl(rawUrl);
     const platform = detectPlatform(url);
 
-    const base: Portfolio = portfolio ?? {
+    const base: Portfolio = portfolioRef.current ?? {
       id: `portfolio_${user.id}`,
       userId: user.id,
       github: null,
@@ -288,10 +300,11 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   };
 
   const removeLink = async (id: string) => {
-    if (!portfolio) return;
+    const current = portfolioRef.current;
+    if (!current) return;
     await save({
-      ...portfolio,
-      links: portfolio.links.filter((l) => l.id !== id),
+      ...current,
+      links: current.links.filter((l) => l.id !== id),
       updatedAt: new Date().toISOString(),
     });
   };
@@ -299,6 +312,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const clearPortfolio = async () => {
     if (!user) return;
     await AsyncStorage.removeItem(`portfolio_${user.id}`);
+    portfolioRef.current = null;
     setPortfolio(null);
   };
 
