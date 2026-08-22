@@ -90,9 +90,18 @@ async function hawkReachable() {
 }
 
 router.get("/status", authenticate, async (_req, res) => {
+  // baseUrl and keyLength are here for diagnosis: "configured: true" only means
+  // the key is non-empty, which cannot distinguish a working setup from a base
+  // URL with a stray quote in it. Neither value is secret.
   res.json({
-    general: { configured: AI_API_KEY.length > 0, model: AI_MODEL },
-    hawk:    { configured: HAWK_URL.length > 0, reachable: await hawkReachable() },
+    general: {
+      configured: AI_API_KEY.length > 0,
+      model: AI_MODEL,
+      baseUrl: AI_BASE_URL,
+      keyLength: AI_API_KEY.length,
+      timeoutMs: AI_TIMEOUT_MS,
+    },
+    hawk: { configured: HAWK_URL.length > 0, reachable: await hawkReachable() },
   });
 });
 
@@ -169,8 +178,12 @@ router.post("/chat", authenticate, aiLimiter, async (req, res) => {
     } catch (e) {
       const aborted = e instanceof Error && e.name === "AbortError";
       if (attempt < retries) continue;
-      console.warn(`[AI] request ${aborted ? `timed out after ${AI_TIMEOUT_MS}ms` : "failed"}:`, e.message);
-      return res.json({ data: null, reason: aborted ? "timeout" : "network_error" });
+      console.warn(`[AI] request ${aborted ? `timed out after ${AI_TIMEOUT_MS}ms` : "failed"}:`, e.message, e.cause?.message ?? "");
+      return res.json({
+        data: null,
+        reason: aborted ? "timeout" : "network_error",
+        detail: aborted ? undefined : `${e.name}: ${e.message}${e.cause?.message ? ` (${e.cause.message})` : ""}`,
+      });
     }
   }
   return res.json({ data: null, reason: "exhausted_retries" });
