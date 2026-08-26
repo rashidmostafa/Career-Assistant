@@ -30,7 +30,13 @@ const { aiLimiter }    = require("../middleware/rateLimiter");
 const AI_API_KEY   = process.env.AI_API_KEY ?? "";
 const AI_BASE_URL  = (process.env.AI_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta/openai").replace(/\/$/, "");
 const AI_MODEL     = process.env.AI_MODEL ?? "gemini-3.6-flash";
-const AI_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS ?? 30000);
+// 120s, not 30s. Scoring a CV and generating a roadmap are long generations —
+// measured at 24-26 seconds against a warm provider — so a 30s ceiling left
+// about four seconds of margin and aborted on any variance. The client then
+// reported "couldn't reach the AI", which pointed at the network rather than at
+// this line. The client budget is the same, so whichever gives up first gives
+// up for a real reason.
+const AI_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS ?? 120000);
 
 // ── Hawk ──────────────────────────────────────────────────────────────────────
 const HAWK_URL        = (process.env.HAWK_URL ?? "").replace(/\/$/, "");

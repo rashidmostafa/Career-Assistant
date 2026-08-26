@@ -143,8 +143,11 @@ services:
       # ── Tuning ───────────────────────────────────────────────────────────
       # Declared with their defaults so they can be changed in the dashboard
       # without a code change or redeploy.
+      # 120s: CV scoring and roadmap generation take 24-26s warm, and a spun-down
+      # instance adds ~22s before the model is reached. The old 30s aborted on
+      # any variance and surfaced as "couldn't reach the AI".
       - key: AI_TIMEOUT_MS
-        value: "30000"
+        value: "120000"
       # Generous: a CPU-hosted Hawk behind a tunnel legitimately takes tens of
       # seconds, and the client waits 60s before falling back.
       - key: HAWK_TIMEOUT_MS
