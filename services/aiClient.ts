@@ -37,10 +37,14 @@ export const isAIConfigured = API_URL.length > 0;
  * reply was not usable JSON — callers treat null as "use the local fallback".
  * Retries and back-off now happen server-side in routes/ai.js.
  */
+/** Set when the last chatJSON call failed because the provider is rate limiting. */
+export let lastRateLimitSeconds: number | null = null;
+
 export async function chatJSON(
   prompt: string,
   opts?: { timeoutMs?: number },
 ): Promise<any | null> {
+  lastRateLimitSeconds = null;
   if (!isAIConfigured) return null;
 
   try {
@@ -50,7 +54,13 @@ export async function chatJSON(
       true,
     );
     if (res?.data == null) {
-      console.warn(`[aiClient] no usable result (${res?.reason ?? "unknown"})`);
+      const reason = (res as any)?.reason ?? "unknown";
+      if (reason === "rate_limited") {
+        // Surfaced separately: "wait a moment" and "check your connection" are
+        // different instructions, and only one of them is true here.
+        lastRateLimitSeconds = (res as any)?.retryAfterSec ?? 30;
+      }
+      console.warn(`[aiClient] no usable result (${reason})`);
       return null;
     }
     return res.data;

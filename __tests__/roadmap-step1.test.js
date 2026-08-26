@@ -3,9 +3,11 @@
  */
 const mockChatJSON = jest.fn();
 let mockConfigured = true;
+let mockRateLimitSec = null;
 jest.mock("@/services/aiClient", () => ({
   get isAIConfigured() { return mockConfigured; },
   chatJSON: (...a) => mockChatJSON(...a),
+  get lastRateLimitSeconds() { return mockRateLimitSec; },
 }));
 
 const { generateRoadmap, validateRoadmap } = require("../services/roadmapAI");
@@ -30,7 +32,7 @@ const input = {
   experienceLevel: "Intermediate",
 };
 
-beforeEach(() => { mockChatJSON.mockReset(); mockConfigured = true; });
+beforeEach(() => { mockChatJSON.mockReset(); mockConfigured = true; mockRateLimitSec = null; });
 
 describe("rule 2 — generated from CV gaps against the target role", () => {
   it("sends the target role, detected skills and CV text", async () => {
@@ -112,6 +114,15 @@ describe("validation and failure reporting", () => {
   it("distinguishes an unreachable AI from a bad reply", async () => {
     mockChatJSON.mockResolvedValue(null);
     expect(await generateRoadmap(input)).toEqual({ ok: false, reason: "unreachable" });
+  });
+
+  it("reports a provider rate limit as such, not as an outage", async () => {
+    // "wait a moment" and "check your connection" send the user to fix
+    // different things, and only one of them is the actual problem.
+    mockChatJSON.mockResolvedValue(null);
+    mockRateLimitSec = 25;
+    const r = await generateRoadmap(input);
+    expect(r).toEqual({ ok: false, reason: "rate_limited", retryAfterSec: 25 });
   });
 
   it("does not retry an unreachable server", async () => {

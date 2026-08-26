@@ -9,7 +9,7 @@
  * roadmap_generator at gap_F1 48.8 and records that the fine-tune cost it its
  * long-form ability, which is exactly what this task needs.
  */
-import { chatJSON, isAIConfigured } from "./aiClient";
+import { chatJSON, isAIConfigured, lastRateLimitSeconds } from "./aiClient";
 
 // ─── Model ────────────────────────────────────────────────────────────────────
 /**
@@ -207,7 +207,7 @@ const GENERATE_TIMEOUT_MS = 120_000;
 
 export type GenerateResult =
   | { ok: true; roadmap: Roadmap }
-  | { ok: false; reason: "no_ai" | "unreachable" | "bad_output" };
+  | { ok: false; reason: "no_ai" | "unreachable" | "bad_output" | "rate_limited"; retryAfterSec?: number };
 
 /**
  * Generates a roadmap, retrying once on unusable output.
@@ -235,7 +235,15 @@ export async function generateRoadmap(input: GenerateInput): Promise<GenerateRes
     if (validated) return { ok: true, roadmap: validated };
 
     // Only a real but unusable answer is worth asking again for.
-    if (raw === null) return { ok: false, reason: "unreachable" };
+    if (raw === null) {
+      // Checked as a number, not `!== null`: an absent value is undefined, and
+      // `undefined !== null` is true — which would report every unreachable
+      // server as a rate limit.
+      if (typeof lastRateLimitSeconds === "number") {
+        return { ok: false, reason: "rate_limited", retryAfterSec: lastRateLimitSeconds };
+      }
+      return { ok: false, reason: "unreachable" };
+    }
     reached = true;
   }
 

@@ -12,7 +12,7 @@
  * omitted rather than invented — a gap has no meaning with nothing to be a gap
  * from.
  */
-import { chatJSON, isAIConfigured } from "./aiClient";
+import { chatJSON, isAIConfigured, lastRateLimitSeconds } from "./aiClient";
 
 export type Severity = "high" | "medium" | "low";
 
@@ -186,7 +186,7 @@ const SCORE_TIMEOUT_MS = 120_000;
 
 export type ScoreResult =
   | { ok: true; report: CVReport }
-  | { ok: false; reason: "no_ai" | "unreachable" | "bad_output" };
+  | { ok: false; reason: "no_ai" | "unreachable" | "bad_output" | "rate_limited"; retryAfterSec?: number };
 
 /** Scores a CV, retrying once if the reply cannot be used. */
 export async function scoreCV(input: ScoreInput): Promise<ScoreResult> {
@@ -207,7 +207,15 @@ export async function scoreCV(input: ScoreInput): Promise<ScoreResult> {
     // Retry only when the model actually answered and the answer was unusable.
     // Retrying an unreachable server just makes the user wait the whole budget
     // twice before being told the same thing.
-    if (raw === null) return { ok: false, reason: "unreachable" };
+    if (raw === null) {
+      // Checked as a number, not `!== null`: an absent value is undefined, and
+      // `undefined !== null` is true — which would report every unreachable
+      // server as a rate limit.
+      if (typeof lastRateLimitSeconds === "number") {
+        return { ok: false, reason: "rate_limited", retryAfterSec: lastRateLimitSeconds };
+      }
+      return { ok: false, reason: "unreachable" };
+    }
     reached = true;
   }
   return { ok: false, reason: reached ? "bad_output" : "unreachable" };

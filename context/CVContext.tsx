@@ -195,6 +195,10 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
         setError(
           result.reason === "no_ai"
             ? "AI isn't configured, so your CV can't be scored yet."
+            : result.reason === "rate_limited"
+            // A quota block, not a network problem. Telling the user to check
+            // their connection sends them to fix something that is not broken.
+            ? `The AI is at its rate limit right now. Try again in about ${result.retryAfterSec ?? 30} seconds.`
             : result.reason === "unreachable"
             ? "Couldn't reach the AI to score your CV. Check your connection and try again."
             : "The AI returned something unusable. Try scoring again."

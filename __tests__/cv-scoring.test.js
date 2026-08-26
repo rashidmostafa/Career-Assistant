@@ -3,9 +3,11 @@
  */
 const mockChatJSON = jest.fn();
 let mockConfigured = true;
+let mockRateLimitSec = null;
 jest.mock("@/services/aiClient", () => ({
   get isAIConfigured() { return mockConfigured; },
   chatJSON: (...a) => mockChatJSON(...a),
+  get lastRateLimitSeconds() { return mockRateLimitSec; },
 }));
 
 const { scoreCV, validateReport } = require("../services/cvAI");
@@ -28,7 +30,7 @@ const fullReply = {
   skill_gaps: [{ skill: "Docker", why: "screened for" }],
 };
 
-beforeEach(() => { mockChatJSON.mockReset(); mockConfigured = true; });
+beforeEach(() => { mockChatJSON.mockReset(); mockConfigured = true; mockRateLimitSec = null; });
 
 describe("the rubric", () => {
   it("scores against the format the candidate declared", async () => {
@@ -106,6 +108,15 @@ describe("failure reporting", () => {
   it("distinguishes unreachable from a bad reply", async () => {
     mockChatJSON.mockResolvedValue(null);
     expect(await scoreCV(input)).toEqual({ ok: false, reason: "unreachable" });
+  });
+
+  it("reports a provider rate limit as such, not as an outage", async () => {
+    // "wait a moment" and "check your connection" send the user to fix
+    // different things, and only one of them is the actual problem.
+    mockChatJSON.mockResolvedValue(null);
+    mockRateLimitSec = 25;
+    const r = await scoreCV(input);
+    expect(r).toEqual({ ok: false, reason: "rate_limited", retryAfterSec: 25 });
   });
 
   it("does not retry an unreachable server", async () => {

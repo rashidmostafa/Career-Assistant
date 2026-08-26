@@ -151,9 +151,22 @@ router.post("/chat", authenticate, aiLimiter, async (req, res) => {
         }),
       }, AI_TIMEOUT_MS);
 
-      // 429 and 503 are transient on free tiers — back off and retry before
-      // handing the caller a null it would turn into a heuristic fallback.
-      if ((upstream.status === 429 || upstream.status === 503) && attempt < retries) {
+      // 429 is a quota block, not a blip. Gemini's free tier allows 20 requests
+      // a minute and states how long to wait — typically ~25 seconds. Retrying
+      // inside that window cannot succeed and each attempt counts against the
+      // same quota, so the old 800ms/1600ms retries turned one tap into three
+      // failures and made the block last longer. Report it instead, with the
+      // wait, so the caller can say something true.
+      if (upstream.status === 429) {
+        const body = await upstream.text().catch(() => "");
+        const m = body.match(/retry in ([\d.]+)s/i);
+        const retryAfterSec = m ? Math.ceil(Number(m[1])) : null;
+        console.warn(`[AI] rate limited by provider${retryAfterSec ? `, retry in ${retryAfterSec}s` : ""}`);
+        return res.json({ data: null, reason: "rate_limited", retryAfterSec });
+      }
+
+      // 503 genuinely is transient — the model is momentarily overloaded.
+      if (upstream.status === 503 && attempt < retries) {
         await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
         continue;
       }
