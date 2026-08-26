@@ -13,6 +13,7 @@ import { CVProvider } from "@/context/CVContext";
 import { JobsProvider } from "@/context/JobsContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { InterviewProvider } from "@/context/InterviewContext";
+import { RoadmapProvider } from "@/context/RoadmapContext";
 import { PortfolioProvider } from "@/context/PortfolioContext";
 import { DialogProvider } from "@/components/ui/AppDialog";
 import { SessionManager } from "@/services/sessionManager";
@@ -164,6 +165,7 @@ function RootLayoutNav() {
     <CVProvider>
       <JobsProvider>
           <InterviewProvider>
+            <RoadmapProvider>
             <PortfolioProvider>
               <DialogProvider>
               {/* OAuth deep link listener — must be inside AuthProvider */}
@@ -183,6 +185,7 @@ function RootLayoutNav() {
               </AuthGate>
               </DialogProvider>
             </PortfolioProvider>
+            </RoadmapProvider>
           </InterviewProvider>
       </JobsProvider>
     </CVProvider>
