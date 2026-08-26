@@ -16,6 +16,7 @@ import { File } from "expo-file-system";
 import AsyncStorage from "@/services/syncedStorage";
 import { useAuth } from "@/context/AuthContext";
 import { extractCV, type CVFileKind } from "@/services/cvApi";
+import { scoreCV, type CVReport } from "@/services/cvAI";
 
 /** The formats offered, plus a free-text option for anything else. */
 export const CV_FORMATS = ["Harvard", "MIT", "Corporate"] as const;
@@ -71,6 +72,9 @@ function parseStoredCV(raw: string | null): CVDocument | null {
 
 interface CVContextType {
   cv: CVDocument | null;
+  /** ATS report for the current CV, or null until it has been scored. */
+  report: CVReport | null;
+  isScoring: boolean;
   pending: PendingCV | null;
   isLoading: boolean;
   isUploading: boolean;
@@ -82,6 +86,8 @@ interface CVContextType {
   discardPending: () => void;
   clearCV: () => Promise<void>;
   clearError: () => void;
+  /** Re-runs scoring for the CV already uploaded. */
+  rescore: () => Promise<void>;
 }
 
 const CVContext = createContext<CVContextType | undefined>(undefined);
@@ -94,8 +100,11 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<CVReport | null>(null);
+  const [isScoring, setIsScoring] = useState(false);
 
   const storageKey = user ? `cv_${user.id}` : null;
+  const reportKey = user ? `cv_report_${user.id}` : null;
 
   useEffect(() => {
     if (!storageKey) { setCv(null); setIsLoading(false); return; }
@@ -109,6 +118,16 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
         // same way on every launch.
         if (raw && !parsed) await AsyncStorage.removeItem(storageKey);
         if (!cancelled) setCv(parsed);
+
+        // A report belongs to one CV. If the CV is gone or was replaced, an old
+        // report would describe a document the user is no longer looking at.
+        if (parsed && reportKey) {
+          const rawReport = await AsyncStorage.getItem(reportKey);
+          const stored = rawReport ? (JSON.parse(rawReport) as CVReport & { forCV?: string }) : null;
+          if (!cancelled) setReport(stored?.forCV === parsed.uploadedAt ? stored : null);
+        } else if (!cancelled) {
+          setReport(null);
+        }
       } catch {
         if (!cancelled) setCv(null);
       } finally {
@@ -162,6 +181,37 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const runScoring = useCallback(async (doc: CVDocument) => {
+    setIsScoring(true);
+    setError(null);
+    try {
+      const result = await scoreCV({
+        cvText: doc.rawText,
+        sourceFormat: doc.sourceFormat,
+        targetRole: user?.targetRole ?? "",
+      });
+
+      if (!result.ok) {
+        setError(
+          result.reason === "no_ai"
+            ? "AI isn't configured, so your CV can't be scored yet."
+            : result.reason === "unreachable"
+            ? "Couldn't reach the AI to score your CV. Check your connection and try again."
+            : "The AI returned something unusable. Try scoring again."
+        );
+        return;
+      }
+
+      setReport(result.report);
+      // Tagged with the CV it describes, so a later upload cannot inherit it.
+      if (reportKey) {
+        await AsyncStorage.setItem(reportKey, JSON.stringify({ ...result.report, forCV: doc.uploadedAt }));
+      }
+    } finally {
+      setIsScoring(false);
+    }
+  }, [user?.targetRole, reportKey]);
+
   const confirmFormat = useCallback(async (format: string) => {
     if (!pending) return;
     const doc: CVDocument = {
@@ -171,8 +221,16 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
     };
     setCv(doc);
     setPending(null);
+    setReport(null);
     if (storageKey) await AsyncStorage.setItem(storageKey, JSON.stringify(doc));
-  }, [pending, storageKey]);
+    // Step 3 follows step 2 directly: answering the format question is what
+    // makes scoring possible, so it starts here rather than behind a button.
+    await runScoring(doc);
+  }, [pending, storageKey, runScoring]);
+
+  const rescore = useCallback(async () => {
+    if (cv) await runScoring(cv);
+  }, [cv, runScoring]);
 
   const discardPending = useCallback(() => { setPending(null); setError(null); }, []);
 
@@ -180,14 +238,16 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
     setCv(null);
     setPending(null);
     setError(null);
+    setReport(null);
     if (storageKey) await AsyncStorage.removeItem(storageKey);
+    if (reportKey) await AsyncStorage.removeItem(reportKey);
   }, [storageKey]);
 
   const clearError = useCallback(() => setError(null), []);
 
   return (
     <CVContext.Provider
-      value={{ cv, pending, isLoading, isUploading, error, pickAndExtract, confirmFormat, discardPending, clearCV, clearError }}
+      value={{ cv, report, isScoring, pending, isLoading, isUploading, error, pickAndExtract, confirmFormat, discardPending, clearCV, clearError, rescore }}
     >
       {children}
     </CVContext.Provider>

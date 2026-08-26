@@ -25,13 +25,14 @@ import * as Haptics from "expo-haptics";
 
 import { useColors } from "@/hooks/useColors";
 import { useCV, CV_FORMATS } from "@/context/CVContext";
+import type { CVIssue, CVReport } from "@/services/cvAI";
 
 export default function CVScreen() {
   const colors = useColors() as any;
   const insets = useSafeAreaInsets();
   const {
-    cv, pending, isLoading, isUploading, error,
-    pickAndExtract, confirmFormat, discardPending, clearError,
+    cv, report, isScoring, pending, isLoading, isUploading, error,
+    pickAndExtract, confirmFormat, discardPending, clearError, rescore,
   } = useCV();
 
   const accent = colors.cv || colors.primary;
@@ -204,17 +205,38 @@ export default function CVScreen() {
           <UploadButton label="Upload a different CV" />
         </View>
 
+        {isScoring && !report && (
+          <View style={[styles.card, styles.empty, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <ActivityIndicator size="large" color={accent} />
+            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Scoring your CV…</Text>
+            <Text style={[styles.sub, { color: colors.mutedForeground, textAlign: "center" }]}>
+              Checking it against how applicant tracking systems actually read a
+              {" "}{cv.sourceFormat} CV.
+            </Text>
+          </View>
+        )}
+
+        {!isScoring && !report && (
+          <View style={[styles.card, styles.empty, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Feather name="bar-chart-2" size={26} color={accent} />
+            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Not scored yet</Text>
+            <Pressable
+              onPress={rescore}
+              style={({ pressed }) => [styles.cta, { backgroundColor: accent, opacity: pressed ? 0.85 : 1 }]}
+              accessibilityRole="button"
+            >
+              <Feather name="zap" size={16} color="#fff" />
+              <Text style={styles.ctaText}>Score my CV</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {!!report && <Report report={report} accent={accent} colors={colors} isScoring={isScoring} onRescore={rescore} />}
+
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 8 }]}>
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>What we read</Text>
           <Text style={[styles.extract, { color: colors.mutedForeground }]} numberOfLines={14}>
             {cv.rawText}
-          </Text>
-        </View>
-
-        <View style={[styles.next, { borderColor: colors.border }]}>
-          <Feather name="clock" size={15} color={colors.mutedForeground} />
-          <Text style={[styles.sub, { color: colors.mutedForeground, flex: 1 }]}>
-            ATS scoring comes next.
           </Text>
         </View>
       </View>
@@ -249,6 +271,122 @@ export default function CVScreen() {
   );
 }
 
+/** Colour by band: green is earned, not given. */
+function scoreTone(score: number, colors: any) {
+  if (score >= 80) return colors.success || "#16a34a";
+  if (score >= 60) return colors.warning || "#d97706";
+  return colors.destructive || "#dc2626";
+}
+
+const SEVERITY_TONE = (s: string, colors: any) =>
+  s === "high" ? (colors.destructive || "#dc2626")
+  : s === "medium" ? (colors.warning || "#d97706")
+  : colors.mutedForeground;
+
+function IssueList({ title, items, colors }: { title: string; items: CVIssue[]; colors: any }) {
+  if (!items.length) return null;
+  return (
+    <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 12 }]}>
+      <Text style={[styles.sectionTitle, { color: colors.foreground }]}>{title}</Text>
+      {items.map((i, idx) => {
+        const tone = SEVERITY_TONE(i.severity, colors);
+        return (
+          <View key={`${i.title}-${idx}`} style={[styles.issue, { borderLeftColor: tone }]}>
+            <View style={styles.issueHead}>
+              <View style={[styles.sevPill, { backgroundColor: tone + "1A", borderColor: tone + "40" }]}>
+                <Text style={[styles.sevText, { color: tone }]}>{i.severity.toUpperCase()}</Text>
+              </View>
+              <Text style={[styles.issueTitle, { color: colors.foreground }]}>{i.title}</Text>
+            </View>
+            {!!i.detail && <Text style={[styles.sub, { color: colors.mutedForeground }]}>{i.detail}</Text>}
+            {!!i.fix && (
+              <View style={styles.fixRow}>
+                <Feather name="arrow-right" size={13} color={colors.success || "#16a34a"} />
+                <Text style={[styles.sub, { color: colors.foreground, flex: 1 }]}>{i.fix}</Text>
+              </View>
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function Report({ report, accent, colors, isScoring, onRescore }: {
+  report: CVReport; accent: string; colors: any; isScoring: boolean; onRescore: () => void;
+}) {
+  const tone = scoreTone(report.score, colors);
+  return (
+    <>
+      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 14 }]}>
+        <View style={styles.scoreRow}>
+          <View style={[styles.scoreBadge, { borderColor: tone }]}>
+            <Text style={[styles.scoreNum, { color: tone }]}>{report.score}</Text>
+            <Text style={[styles.scoreMax, { color: colors.mutedForeground }]}>/100</Text>
+          </View>
+          <View style={{ flex: 1, gap: 4 }}>
+            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>ATS score</Text>
+            <Text style={[styles.meta, { color: colors.mutedForeground }]}>
+              {report.scoredFormat} format{report.targetRole ? ` · ${report.targetRole}` : ""}
+            </Text>
+          </View>
+          <Pressable
+            onPress={onRescore}
+            disabled={isScoring}
+            style={({ pressed }) => [styles.iconBtn, { borderColor: colors.border, opacity: pressed || isScoring ? 0.5 : 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Score again"
+          >
+            <Feather name="refresh-cw" size={15} color={colors.foreground} />
+          </Pressable>
+        </View>
+
+        {!!report.verdict && (
+          <Text style={[styles.sub, { color: colors.foreground }]}>{report.verdict}</Text>
+        )}
+
+        <View style={{ gap: 10 }}>
+          {report.dimensions.map((d) => {
+            const dTone = scoreTone(d.score, colors);
+            return (
+              <View key={d.key} style={{ gap: 5 }}>
+                <View style={styles.dimHead}>
+                  <Text style={[styles.dimLabel, { color: colors.foreground }]}>{d.label}</Text>
+                  <Text style={[styles.dimScore, { color: dTone }]}>{d.score}</Text>
+                </View>
+                <View style={[styles.track, { backgroundColor: colors.border }]}>
+                  <View style={[styles.fill, { width: `${d.score}%`, backgroundColor: dTone }]} />
+                </View>
+                {!!d.note && <Text style={[styles.note, { color: colors.mutedForeground }]}>{d.note}</Text>}
+              </View>
+            );
+          })}
+        </View>
+      </View>
+
+      <IssueList title="Formatting problems" items={report.formattingIssues} colors={colors} />
+      <IssueList title="Essentials to fix" items={report.essentials} colors={colors} />
+
+      {report.skillGaps.length > 0 && (
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 10 }]}>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
+            Skills this role screens for
+          </Text>
+          <Text style={[styles.sub, { color: colors.mutedForeground }]}>
+            Not on your CV, and looked for in {report.targetRole} applications.
+          </Text>
+          {report.skillGaps.map((g, i) => (
+            <View key={`${g.skill}-${i}`} style={{ gap: 3 }}>
+              <Text style={[styles.gapSkill, { color: accent }]}>{g.skill}</Text>
+              {!!g.why && <Text style={[styles.sub, { color: colors.mutedForeground }]}>{g.why}</Text>}
+            </View>
+          ))}
+        </View>
+      )}
+    </>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { paddingHorizontal: 20, paddingBottom: 14, borderBottomWidth: 1 },
@@ -274,4 +412,22 @@ const styles = StyleSheet.create({
   extract: { fontSize: 12, lineHeight: 18 },
   next: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderStyle: "dashed" },
   error: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 12, borderWidth: 1 },
+  iconBtn: { width: 34, height: 34, borderRadius: 9, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  scoreRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  scoreBadge: { width: 64, height: 64, borderRadius: 32, borderWidth: 3, alignItems: "center", justifyContent: "center" },
+  scoreNum: { fontSize: 22, fontWeight: "800" },
+  scoreMax: { fontSize: 10, marginTop: -2 },
+  dimHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  dimLabel: { fontSize: 13, fontWeight: "600" },
+  dimScore: { fontSize: 13, fontWeight: "800" },
+  track: { height: 5, borderRadius: 3, overflow: "hidden" },
+  fill: { height: 5, borderRadius: 3 },
+  note: { fontSize: 11, lineHeight: 16 },
+  issue: { gap: 6, paddingLeft: 11, borderLeftWidth: 3 },
+  issueHead: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  sevPill: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
+  sevText: { fontSize: 9, fontWeight: "800", letterSpacing: 0.5 },
+  issueTitle: { fontSize: 14, fontWeight: "700", flexShrink: 1 },
+  fixRow: { flexDirection: "row", gap: 7, alignItems: "flex-start" },
+  gapSkill: { fontSize: 14, fontWeight: "700" },
 });
