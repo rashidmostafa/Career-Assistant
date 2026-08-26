@@ -159,8 +159,12 @@ router.post("/chat", authenticate, aiLimiter, async (req, res) => {
         return res.json({ data: null, reason: `upstream_${upstream.status}` });
       }
 
-      const json = await upstream.json();
-      const content = json?.choices?.[0]?.message?.content;
+      // Named `completion`, not `json`: a second `const json` in this scope put
+      // the `json` request flag read above into a temporal dead zone, so every
+      // call threw "Cannot access 'json' before initialization" before it sent
+      // anything. Silent, because callers treat a throw as a soft failure.
+      const completion = await upstream.json();
+      const content = completion?.choices?.[0]?.message?.content;
       if (!content) {
         // Some models spend their whole budget on internal reasoning and
         // return an empty message; a retry usually produces a usable reply.
