@@ -9,7 +9,6 @@
  * Uses expo-notifications for local scheduling. For Firebase Cloud Messaging
  * (FCM) push tokens, the token is obtained here and can be sent to the server.
  */
-import * as Notifications from "expo-notifications";
 import * as Device from "expo-constants";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -28,15 +27,24 @@ import { SessionManager } from "./sessionManager";
  */
 const IS_EXPO_GO = Device.default?.executionEnvironment === "storeClient";
 
+/**
+ * Loaded with require(), not a static import.
+ *
+ * Expo Go dropped remote push in SDK 53, and simply loading expo-notifications
+ * there raises a full-screen red error at import time — before any guard in
+ * this file can run, and looking for all the world like a build failure. Not
+ * importing it is the only way to avoid that, so in Expo Go this is null and
+ * every entry point below returns early.
+ */
+const Notifications: typeof import("expo-notifications") | null =
+  IS_EXPO_GO ? null : require("expo-notifications");
+
 const PUSH_TOKEN_KEY = "auth_push_token";
 const NOTIF_IDS_KEY  = "auth_scheduled_notif_ids";
 
-// Configure foreground presentation.
-//
-// Skipped in Expo Go: touching the notifications module there triggers the
-// SDK 53 removal error on every launch, and there is nothing to configure
-// because remote push cannot work in that runtime anyway.
-if (!IS_EXPO_GO) Notifications.setNotificationHandler({
+// Configure foreground presentation. Null in Expo Go, where the module is
+// never loaded, so there is nothing to configure.
+Notifications?.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
     shouldPlaySound: false,
@@ -48,6 +56,7 @@ if (!IS_EXPO_GO) Notifications.setNotificationHandler({
 
 // ─── Channel setup (Android) ──────────────────────────────────────────────────
 async function ensureChannel(): Promise<void> {
+  if (!Notifications) return;
   if (Platform.OS !== "android") return;
   await Notifications.setNotificationChannelAsync("security-reminders", {
     name: "Security Reminders",
@@ -60,6 +69,7 @@ async function ensureChannel(): Promise<void> {
 
 // ─── Permission ───────────────────────────────────────────────────────────────
 export async function requestNotificationPermission(): Promise<boolean> {
+  if (!Notifications) return false;
   await ensureChannel();
   const { status: existing } = await Notifications.getPermissionsAsync();
   if (existing === "granted") return true;
@@ -69,7 +79,7 @@ export async function requestNotificationPermission(): Promise<boolean> {
 
 // ─── Push token (for FCM / APNs) ──────────────────────────────────────────────
 export async function registerForPushNotifications(): Promise<string | null> {
-  if (IS_EXPO_GO) {
+  if (IS_EXPO_GO || !Notifications) {
     console.log("[notifications] Remote push is unavailable in Expo Go — needs a development build.");
     return null;
   }
@@ -131,6 +141,7 @@ export async function getStoredPushToken(): Promise<string | null> {
 
 // ─── Cancel all scheduled reminders ───────────────────────────────────────────
 async function cancelScheduledReminders(): Promise<void> {
+  if (!Notifications) return;
   const raw = await AsyncStorage.getItem(NOTIF_IDS_KEY);
   if (!raw) return;
   const ids: string[] = JSON.parse(raw);
@@ -140,6 +151,7 @@ async function cancelScheduledReminders(): Promise<void> {
 
 // ─── Schedule all session reminders at once ───────────────────────────────────
 export async function scheduleSessionReminders(sessionStartMs: number): Promise<void> {
+  if (!Notifications) return;
   await cancelScheduledReminders();
   const granted = await requestNotificationPermission();
   if (!granted) return;
@@ -212,6 +224,7 @@ export async function scheduleSessionReminders(sessionStartMs: number): Promise<
 
 // ─── Trigger an immediate local notification ──────────────────────────────────
 export async function sendImmediateReminder(urgency: ReauthUrgency): Promise<void> {
+  if (!Notifications) return;
   const messages: Record<string, { title: string; body: string }> = {
     weekly: {
       title: "🔒 Session expiring in 6 days",
