@@ -17,11 +17,26 @@ import type { ReauthUrgency } from "./sessionManager";
 import { apiFetch } from "./authApiService";
 import { SessionManager } from "./sessionManager";
 
+/**
+ * Expo Go dropped remote push notifications in SDK 53, and expo-notifications
+ * logs a full-width red error every time it is touched there. The feature
+ * genuinely cannot work in Expo Go — it needs a development build — so on that
+ * runtime the push calls are skipped rather than attempted, which removes an
+ * alarming error that nothing can be done about while developing.
+ *
+ * Local scheduled reminders still work in Expo Go and are left alone.
+ */
+const IS_EXPO_GO = Device.default?.executionEnvironment === "storeClient";
+
 const PUSH_TOKEN_KEY = "auth_push_token";
 const NOTIF_IDS_KEY  = "auth_scheduled_notif_ids";
 
-// Configure foreground presentation
-Notifications.setNotificationHandler({
+// Configure foreground presentation.
+//
+// Skipped in Expo Go: touching the notifications module there triggers the
+// SDK 53 removal error on every launch, and there is nothing to configure
+// because remote push cannot work in that runtime anyway.
+if (!IS_EXPO_GO) Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
     shouldPlaySound: false,
@@ -54,6 +69,10 @@ export async function requestNotificationPermission(): Promise<boolean> {
 
 // ─── Push token (for FCM / APNs) ──────────────────────────────────────────────
 export async function registerForPushNotifications(): Promise<string | null> {
+  if (IS_EXPO_GO) {
+    console.log("[notifications] Remote push is unavailable in Expo Go — needs a development build.");
+    return null;
+  }
   try {
     const granted = await requestNotificationPermission();
     if (!granted) return null;
@@ -87,6 +106,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
  * called again after sign-in so a token obtained while signed out still lands.
  */
 export async function syncPushTokenToServer(token?: string | null): Promise<boolean> {
+  if (IS_EXPO_GO) return false;
   try {
     const pushToken = token ?? (await AsyncStorage.getItem(PUSH_TOKEN_KEY));
     if (!pushToken) return false;

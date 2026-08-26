@@ -39,6 +39,36 @@ export interface PendingCV {
   chars: number;
 }
 
+/**
+ * Accepts a stored CV only if it matches the shape this version writes.
+ *
+ * The previous CV engine used this same storage key for a completely different
+ * object — no `chars`, no `kind`, a different notion of format — so a device
+ * that had used the old engine handed this one a document whose fields were
+ * undefined, and the screen crashed rendering it. Stored data has to be checked
+ * like any other input; anything unrecognised is treated as no CV at all, which
+ * is recoverable by uploading again.
+ */
+function parseStoredCV(raw: string | null): CVDocument | null {
+  if (!raw) return null;
+  try {
+    const d = JSON.parse(raw);
+    if (
+      d && typeof d === "object" &&
+      typeof d.rawText === "string" && d.rawText.length > 0 &&
+      typeof d.fileName === "string" &&
+      typeof d.chars === "number" &&
+      (d.kind === "pdf" || d.kind === "docx") &&
+      typeof d.sourceFormat === "string"
+    ) {
+      return d as CVDocument;
+    }
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
+
 interface CVContextType {
   cv: CVDocument | null;
   pending: PendingCV | null;
@@ -74,7 +104,11 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(storageKey);
-        if (!cancelled) setCv(raw ? (JSON.parse(raw) as CVDocument) : null);
+        const parsed = parseStoredCV(raw);
+        // A stored value we cannot use is cleared rather than left to fail the
+        // same way on every launch.
+        if (raw && !parsed) await AsyncStorage.removeItem(storageKey);
+        if (!cancelled) setCv(parsed);
       } catch {
         if (!cancelled) setCv(null);
       } finally {

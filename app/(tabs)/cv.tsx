@@ -93,7 +93,7 @@ export default function CVScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={[styles.fileName, { color: colors.foreground }]} numberOfLines={1}>{pending.fileName}</Text>
                 <Text style={[styles.meta, { color: colors.mutedForeground }]}>
-                  {pending.chars.toLocaleString()} characters read
+                  {(pending.chars ?? 0).toLocaleString()} characters read
                 </Text>
               </View>
               <Feather name="check-circle" size={18} color={colors.success || "#16a34a"} />
@@ -197,7 +197,7 @@ export default function CVScreen() {
             <View style={{ flex: 1 }}>
               <Text style={[styles.fileName, { color: colors.foreground }]} numberOfLines={1}>{cv.fileName}</Text>
               <Text style={[styles.meta, { color: colors.mutedForeground }]}>
-                {cv.sourceFormat} format · {cv.chars.toLocaleString()} characters
+                {cv.sourceFormat} format · {(cv.chars ?? 0).toLocaleString()} characters
               </Text>
             </View>
           </View>
