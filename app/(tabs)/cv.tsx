@@ -34,6 +34,7 @@ export default function CVScreen() {
   const router = useRouter();
   const {
     cv, report, isScoring, pending, isLoading, isUploading, error,
+    optimised, isOptimising, optimise,
     pickAndExtract, confirmFormat, discardPending, clearError, rescore,
   } = useCV();
 
@@ -43,6 +44,10 @@ export default function CVScreen() {
 
   const [choice, setChoice] = useState<string | null>(null);
   const [otherFormat, setOtherFormat] = useState("");
+  // The output format is asked separately: a CV written in one convention is
+  // often best rewritten into another for a given employer.
+  const [outChoice, setOutChoice] = useState<string | null>(null);
+  const [outOther, setOutOther] = useState("");
 
   const upload = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -262,6 +267,122 @@ export default function CVScreen() {
                 <Text style={styles.ctaText}>Upgrade my score</Text>
               </Pressable>
             </View>
+
+            {/* Step 6 — the rewritten CV. */}
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 12 }]}>
+              <View style={{ gap: 4 }}>
+                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Optimised CV</Text>
+                <Text style={[styles.sub, { color: colors.mutedForeground }]}>
+                  Rewritten to score better using only what your CV already evidences.
+                  Nothing is added that you can't defend in an interview.
+                </Text>
+              </View>
+
+              {!optimised && !isOptimising && (
+                <>
+                  <Text style={[styles.label, { color: colors.mutedForeground }]}>WRITE IT IN</Text>
+                  {[...CV_FORMATS, "Other"].map((f) => {
+                    const selected = outChoice === f;
+                    return (
+                      <Pressable
+                        key={f}
+                        onPress={() => { setOutChoice(f); Haptics.selectionAsync().catch(() => {}); }}
+                        style={({ pressed }) => [
+                          styles.option,
+                          {
+                            borderColor: selected ? accent : colors.border,
+                            backgroundColor: selected ? accent + "12" : colors.background,
+                            opacity: pressed ? 0.85 : 1,
+                          },
+                        ]}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected }}
+                      >
+                        <Feather name={selected ? "check-circle" : "circle"} size={17}
+                          color={selected ? accent : colors.mutedForeground} />
+                        <Text style={[styles.optionText, { color: selected ? accent : colors.foreground }]}>
+                          {f === "Other" ? "Other / not sure" : `${f} format`}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                  {outChoice === "Other" && (
+                    <TextInput
+                      style={[styles.input, { backgroundColor: colors.background, color: colors.foreground, borderColor: colors.border }]}
+                      placeholder="Name the format"
+                      placeholderTextColor={colors.mutedForeground}
+                      value={outOther}
+                      onChangeText={setOutOther}
+                    />
+                  )}
+                  <Pressable
+                    onPress={() => {
+                      const f = outChoice === "Other" ? outOther.trim() : (outChoice ?? "");
+                      if (f) optimise(f);
+                    }}
+                    disabled={outChoice === "Other" ? !outOther.trim() : !outChoice}
+                    style={({ pressed }) => [
+                      styles.cta,
+                      {
+                        backgroundColor: accent,
+                        opacity: (outChoice === "Other" ? !outOther.trim() : !outChoice) ? 0.45 : pressed ? 0.85 : 1,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                  >
+                    <Feather name="edit-3" size={16} color="#fff" />
+                    <Text style={styles.ctaText}>Write my optimised CV</Text>
+                  </Pressable>
+                </>
+              )}
+
+              {isOptimising && (
+                <View style={{ alignItems: "center", gap: 10, paddingVertical: 20 }}>
+                  <ActivityIndicator size="large" color={accent} />
+                  <Text style={[styles.sub, { color: colors.mutedForeground }]}>Rewriting your CV…</Text>
+                </View>
+              )}
+
+              {!!optimised && (
+                <>
+                  {optimised.flagged.length > 0 && (
+                    /* Surfaced, never silently kept: the candidate is the only
+                       one who knows whether they can stand behind a claim. */
+                    <View style={[styles.error, { backgroundColor: (colors.warning || "#d97706") + "14", borderColor: (colors.warning || "#d97706") + "40" }]}>
+                      <Feather name="alert-triangle" size={15} color={colors.warning || "#d97706"} />
+                      <Text style={[styles.sub, { color: colors.foreground, flex: 1 }]}>
+                        Check these before sending — they appear in the rewrite but not in your
+                        original CV: {optimised.flagged.join(", ")}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.fileRow}>
+                    <Feather name="check-circle" size={16} color={colors.success || "#16a34a"} />
+                    <Text style={[styles.meta, { color: colors.mutedForeground, flex: 1 }]}>
+                      {optimised.targetFormat} format
+                    </Text>
+                    <Pressable
+                      onPress={() => { setOutChoice(null); setOutOther(""); optimise(optimised.targetFormat); }}
+                      disabled={isOptimising}
+                      style={({ pressed }) => [styles.iconBtn, { borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Rewrite again"
+                    >
+                      <Feather name="refresh-cw" size={15} color={colors.foreground} />
+                    </Pressable>
+                  </View>
+                  <Text style={[styles.optimisedText, { color: colors.foreground }]} selectable>
+                    {optimised.text}
+                  </Text>
+                  <View style={[styles.next, { borderColor: colors.border }]}>
+                    <Feather name="download" size={15} color={colors.mutedForeground} />
+                    <Text style={[styles.sub, { color: colors.mutedForeground, flex: 1 }]}>
+                      PDF and Word download comes next.
+                    </Text>
+                  </View>
+                </>
+              )}
+            </View>
           </>
         )}
 
@@ -462,4 +583,6 @@ const styles = StyleSheet.create({
   issueTitle: { fontSize: 14, fontWeight: "700", flexShrink: 1 },
   fixRow: { flexDirection: "row", gap: 7, alignItems: "flex-start" },
   gapSkill: { fontSize: 14, fontWeight: "700" },
+  optimisedText: { fontSize: 12, lineHeight: 19, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" },
+  label: { fontSize: 10, fontWeight: "800", letterSpacing: 0.9 },
 });

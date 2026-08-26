@@ -17,7 +17,7 @@ import AsyncStorage from "@/services/syncedStorage";
 import { extractSkillsFromText } from "@/utils/skillsExtract";
 import { useAuth } from "@/context/AuthContext";
 import { extractCV, type CVFileKind } from "@/services/cvApi";
-import { scoreCV, type CVReport } from "@/services/cvAI";
+import { scoreCV, generateOptimisedCV, type CVReport, type OptimisedCV } from "@/services/cvAI";
 
 /** The formats offered, plus a free-text option for anything else. */
 export const CV_FORMATS = ["Harvard", "MIT", "Corporate"] as const;
@@ -84,6 +84,12 @@ interface CVContextType {
   /** ATS report for the current CV, or null until it has been scored. */
   report: CVReport | null;
   isScoring: boolean;
+  /** The rewritten CV, once the user has asked for one. */
+  optimised: OptimisedCV | null;
+  isOptimising: boolean;
+  /** Writes an improved CV in the chosen format, using only evidenced skills. */
+  optimise: (targetFormat: string) => Promise<void>;
+  clearOptimised: () => Promise<void>;
   pending: PendingCV | null;
   isLoading: boolean;
   isUploading: boolean;
@@ -111,9 +117,12 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<CVReport | null>(null);
   const [isScoring, setIsScoring] = useState(false);
+  const [optimised, setOptimised] = useState<OptimisedCV | null>(null);
+  const [isOptimising, setIsOptimising] = useState(false);
 
   const storageKey = user ? `cv_${user.id}` : null;
   const reportKey = user ? `cv_report_${user.id}` : null;
+  const optimisedKey = user ? `cv_optimised_${user.id}` : null;
 
   const skills = useMemo(
     () => (cv?.rawText ? extractSkillsFromText(cv.rawText) : []),
@@ -139,8 +148,15 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
           const rawReport = await AsyncStorage.getItem(reportKey);
           const stored = rawReport ? (JSON.parse(rawReport) as CVReport & { forCV?: string }) : null;
           if (!cancelled) setReport(stored?.forCV === parsed.uploadedAt ? stored : null);
+
+          if (optimisedKey) {
+            const rawOpt = await AsyncStorage.getItem(optimisedKey);
+            const opt = rawOpt ? (JSON.parse(rawOpt) as OptimisedCV & { forCV?: string }) : null;
+            if (!cancelled) setOptimised(opt?.forCV === parsed.uploadedAt ? opt : null);
+          }
         } else if (!cancelled) {
           setReport(null);
+          setOptimised(null);
         }
       } catch {
         if (!cancelled) setCv(null);
@@ -240,11 +256,61 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
     setCv(doc);
     setPending(null);
     setReport(null);
+    setOptimised(null);
     if (storageKey) await AsyncStorage.setItem(storageKey, JSON.stringify(doc));
+    if (optimisedKey) await AsyncStorage.removeItem(optimisedKey);
     // Step 3 follows step 2 directly: answering the format question is what
     // makes scoring possible, so it starts here rather than behind a button.
     await runScoring(doc);
-  }, [pending, storageKey, runScoring]);
+  }, [pending, storageKey, optimisedKey, runScoring]);
+
+  const optimise = useCallback(async (targetFormat: string) => {
+    if (!cv || !targetFormat.trim()) return;
+    setIsOptimising(true);
+    setError(null);
+    try {
+      const result = await generateOptimisedCV({
+        cvText: cv.rawText,
+        targetFormat: targetFormat.trim(),
+        targetRole: user?.targetRole ?? "",
+        cvSkills: skills,
+        // Skills earned by completing roadmap milestones belong here. Roadmap
+        // completion tracking does not exist yet, so nothing is claimed on that
+        // basis — an empty list is the honest value, not a placeholder.
+        gainedSkills: [],
+        // Give the rewrite the problems the score found, so it fixes those
+        // rather than making cosmetic changes.
+        issues: report
+          ? [...report.formattingIssues, ...report.essentials].map((i) => `${i.title}: ${i.fix || i.detail}`)
+          : undefined,
+      });
+
+      if (!result.ok) {
+        setError(
+          result.reason === "no_ai"
+            ? "AI isn't configured, so an optimised CV can't be written yet."
+            : result.reason === "rate_limited"
+            ? `The AI is at its rate limit right now. Try again in about ${result.retryAfterSec ?? 30} seconds.`
+            : result.reason === "unreachable"
+            ? "Couldn't reach the AI. Check your connection and try again."
+            : "The AI couldn't produce a usable CV. Try again."
+        );
+        return;
+      }
+
+      setOptimised(result.cv);
+      if (optimisedKey) {
+        await AsyncStorage.setItem(optimisedKey, JSON.stringify({ ...result.cv, forCV: cv.uploadedAt }));
+      }
+    } finally {
+      setIsOptimising(false);
+    }
+  }, [cv, skills, user?.targetRole, report, optimisedKey]);
+
+  const clearOptimised = useCallback(async () => {
+    setOptimised(null);
+    if (optimisedKey) await AsyncStorage.removeItem(optimisedKey);
+  }, [optimisedKey]);
 
   const rescore = useCallback(async () => {
     if (cv) await runScoring(cv);
@@ -257,15 +323,17 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
     setPending(null);
     setError(null);
     setReport(null);
+    setOptimised(null);
     if (storageKey) await AsyncStorage.removeItem(storageKey);
     if (reportKey) await AsyncStorage.removeItem(reportKey);
+    if (optimisedKey) await AsyncStorage.removeItem(optimisedKey);
   }, [storageKey]);
 
   const clearError = useCallback(() => setError(null), []);
 
   return (
     <CVContext.Provider
-      value={{ cv, skills, report, isScoring, pending, isLoading, isUploading, error, pickAndExtract, confirmFormat, discardPending, clearCV, clearError, rescore }}
+      value={{ cv, skills, report, isScoring, optimised, isOptimising, optimise, clearOptimised, pending, isLoading, isUploading, error, pickAndExtract, confirmFormat, discardPending, clearCV, clearError, rescore }}
     >
       {children}
     </CVContext.Provider>

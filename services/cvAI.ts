@@ -220,3 +220,152 @@ export async function scoreCV(input: ScoreInput): Promise<ScoreResult> {
   }
   return { ok: false, reason: reached ? "bad_output" : "unreachable" };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Optimised CV
+// ─────────────────────────────────────────────────────────────────────────────
+import { extractSkillsFromText, canonicalizeSkill } from "@/utils/skillsExtract";
+
+export interface OptimiseInput {
+  cvText: string;
+  /** The format the rewritten CV should follow — may differ from the source. */
+  targetFormat: string;
+  targetRole: string;
+  /** Skills the CV already evidences. */
+  cvSkills: string[];
+  /**
+   * Skills the user has since genuinely acquired, e.g. by completing roadmap
+   * milestones. Empty until roadmap completion tracking exists.
+   */
+  gainedSkills?: string[];
+  /** Problems the score found, so the rewrite actually addresses them. */
+  issues?: string[];
+}
+
+export interface OptimisedCV {
+  text: string;
+  targetFormat: string;
+  /**
+   * Skills that appeared in the rewrite but are not evidenced anywhere.
+   *
+   * Empty is the goal. Non-empty is surfaced to the user rather than hidden:
+   * a CV that quietly claims skills they do not have is worse than no rewrite,
+   * because they only discover it in an interview.
+   */
+  flagged: string[];
+  generatedAt: string;
+}
+
+const OPTIMISE_TIMEOUT_MS = 120_000;
+
+const HONESTY_RULES = `Absolute rules — these override every other consideration:
+- You may ONLY present skills, tools, technologies, employers, titles, dates, qualifications and achievements that appear in the source CV or the explicitly permitted list below.
+- Never add a skill to raise the score. Never imply experience with something not evidenced. Never invent a metric, a percentage, an employer, a date or a certification.
+- You may rephrase, restructure, reorder, tighten wording, use stronger verbs, surface things buried in prose, and apply the target format's conventions. That is the whole of what you may do.
+- If the CV is weak in an area, leave it weak. Do not paper over it. The candidate has to defend every line of this in an interview.`;
+
+function buildOptimisePrompt(input: OptimiseInput): string {
+  const permitted = [...new Set([...(input.cvSkills ?? []), ...(input.gainedSkills ?? [])])];
+  return `You are rewriting a candidate's CV to score better with applicant tracking systems, without making a single claim that is not true.
+
+${HONESTY_RULES}
+
+PERMITTED SKILLS (from their CV${input.gainedSkills?.length ? " and skills they have since genuinely acquired" : ""}):
+${permitted.length ? permitted.join(", ") : "none detected automatically — use only what the source CV shows"}
+
+TARGET ROLE: ${input.targetRole || "not specified"}
+WRITE IT IN THIS FORMAT: ${input.targetFormat}
+${input.issues?.length ? `\nPROBLEMS THE SCORE FOUND — fix these:\n${input.issues.map((i) => `- ${i}`).join("\n")}` : ""}
+
+SOURCE CV:
+${input.cvText.slice(0, 12000)}
+
+Return JSON only:
+{ "cv": "the complete rewritten CV as plain text, with section headings, ready to paste" }`;
+}
+
+/**
+ * Names skills the rewrite claims that nothing supports.
+ *
+ * The prompt forbids invention, and mostly it complies — but "mostly" is not
+ * good enough when the consequence is a candidate being asked about Kubernetes
+ * in an interview because we put it on their CV. So the output is checked
+ * against the source text and the permitted list, not trusted.
+ */
+export function findUnsupportedSkills(
+  optimised: string,
+  input: Pick<OptimiseInput, "cvText" | "cvSkills" | "gainedSkills">,
+): string[] {
+  // The baseline is derived with the same extractor that reads the rewrite, so
+  // both sides infer alike. Without this, a CV listing Node.js and Express
+  // yields "JavaScript" from the rewrite but not from the caller's skill list,
+  // and an entirely reasonable mention gets reported as a fabrication.
+  const permitted = new Set(
+    [
+      ...extractSkillsFromText(input.cvText ?? ""),
+      ...(input.cvSkills ?? []),
+      ...(input.gainedSkills ?? []),
+    ].map(canonicalizeSkill),
+  );
+
+  // Anything written in the source is evidence too, even where the extractor
+  // does not name it as a skill.
+  const sourceLower = (input.cvText ?? "").toLowerCase();
+
+  return extractSkillsFromText(optimised)
+    .filter((skill) => {
+      if (permitted.has(canonicalizeSkill(skill))) return false;
+      return !sourceLower.includes(skill.toLowerCase());
+    })
+    .slice(0, 15);
+}
+
+export type OptimiseResult =
+  | { ok: true; cv: OptimisedCV }
+  | { ok: false; reason: "no_ai" | "unreachable" | "bad_output" | "rate_limited"; retryAfterSec?: number };
+
+/**
+ * Rewrites the CV, then checks it did not invent anything.
+ *
+ * On finding unsupported claims it asks once more, naming them — which is
+ * usually enough. Anything still present is returned in `flagged` rather than
+ * silently accepted or silently stripped, because the candidate is the one who
+ * knows whether they can defend it.
+ */
+export async function generateOptimisedCV(input: OptimiseInput): Promise<OptimiseResult> {
+  if (!isAIConfigured) return { ok: false, reason: "no_ai" };
+
+  let prompt = buildOptimisePrompt(input);
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await chatJSON(prompt, { timeoutMs: OPTIMISE_TIMEOUT_MS });
+
+    if (raw === null) {
+      if (typeof lastRateLimitSeconds === "number") {
+        return { ok: false, reason: "rate_limited", retryAfterSec: lastRateLimitSeconds };
+      }
+      return { ok: false, reason: "unreachable" };
+    }
+
+    const text = str(raw?.cv);
+    if (!text || text.length < 120) {
+      prompt = `${buildOptimisePrompt(input)}\n\nYour previous reply was empty or truncated. Return ONLY the JSON object with the complete CV.`;
+      continue;
+    }
+
+    const flagged = findUnsupportedSkills(text, input);
+    if (flagged.length === 0 || attempt === 1) {
+      return {
+        ok: true,
+        cv: { text, targetFormat: input.targetFormat, flagged, generatedAt: new Date().toISOString() },
+      };
+    }
+
+    prompt = `${buildOptimisePrompt(input)}
+
+Your previous attempt introduced these, which do not appear in the source CV and are not permitted: ${flagged.join(", ")}.
+Remove every one of them and rewrite. Do not substitute other unsupported claims.`;
+  }
+
+  return { ok: false, reason: "bad_output" };
+}
