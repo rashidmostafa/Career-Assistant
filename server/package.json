@@ -1,12 +1,12 @@
 {
   "name": "career-assistant-auth-server",
   "version": "1.0.0",
-  "description": "Career Assistant authentication API — Express + MongoDB + JWT + bcrypt + TOTP",
+  "description": "Career Assistant authentication API \u2014 Express + MongoDB + JWT + bcrypt + TOTP",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
-    "test": "jest --forceExit --runInBand"
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --forceExit --runInBand"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
