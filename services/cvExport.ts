@@ -87,6 +87,12 @@ async function share(uri: string, mimeType: string, title: string): Promise<Expo
   return { ok: true };
 }
 
+/**
+ * Saves any document — a CV or a cover letter — as PDF.
+ *
+ * Shared rather than duplicated: a cover letter and a CV want the same
+ * typography and the same share flow, and two copies of this would drift.
+ */
 export async function exportAsPdf(text: string, name = "optimised-cv"): Promise<ExportOutcome> {
   try {
     const { uri } = await Print.printToFileAsync({ html: toPrintHtml(text) });

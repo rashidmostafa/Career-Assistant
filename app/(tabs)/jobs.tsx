@@ -19,6 +19,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MatchBadge } from "@/components/MatchBadge";
 import { useJobs, type JobListing } from "@/context/JobsContext";
+import { exportAsPdf, exportAsWord } from "@/services/cvExport";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { JOB_PLATFORMS, PLATFORM_CATEGORY_LABELS, BD_LOCATIONS, JOB_TYPES, JOB_EXPERIENCE_LEVELS, getPlatformSearchUrl, type JobPlatform, PlatformCategory } from "@/constants/jobPlatforms";
@@ -52,6 +53,7 @@ export default function JobsScreen() {
     refreshJobs,
   } = useJobs();
   const [search, setSearch] = useState("");
+  const [letterExport, setLetterExport] = useState<"pdf" | "word" | null>(null);
   const [selectedJob, setSelectedJob] = useState<JobListing | null>(null);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -74,6 +76,19 @@ export default function JobsScreen() {
     (filters.jobType ? 1 : 0) +
     (filters.experienceLevel ? 1 : 0) +
     (enabledPlatformIds.length < JOB_PLATFORMS.length ? 1 : 0);
+
+  /** Saves the letter as a file the user can attach to an application. */
+  const downloadLetter = async (kind: "pdf" | "word", letter: string, job: JobListing) => {
+    if (letterExport) return;
+    setLetterExport(kind);
+    try {
+      const name = `cover-letter-${job.company}-${job.title}`.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 60);
+      const result = kind === "pdf" ? await exportAsPdf(letter, name) : await exportAsWord(letter, name);
+      if (!result.ok) showAlert("Couldn't save the letter", result.message);
+    } finally {
+      setLetterExport(null);
+    }
+  };
 
   const handleGenerate = async (job: JobListing) => {
     setGeneratingId(job.id);
@@ -312,8 +327,35 @@ export default function JobsScreen() {
 
               <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Generated Cover Letter</Text>
               <View style={[styles.coverBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Text style={[styles.coverText, { color: colors.foreground }]}>{match?.coverLetter}</Text>
+                <Text style={[styles.coverText, { color: colors.foreground }]} selectable>{match?.coverLetter}</Text>
               </View>
+              {/* A letter you cannot get off the phone is not ready to submit. */}
+              {!!match?.coverLetter && (
+                <View style={{ flexDirection: "row", gap: 10, marginBottom: 16 }}>
+                  <TouchableOpacity
+                    style={[styles.letterDownloadBtn, { backgroundColor: jobsColor }]}
+                    disabled={!!letterExport}
+                    onPress={() => downloadLetter("pdf", match.coverLetter!, selectedJob)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Download cover letter as PDF"
+                  >
+                    {letterExport === "pdf"
+                      ? <ActivityIndicator size="small" color="#fff" />
+                      : <Text style={styles.letterDownloadText}>Download PDF</Text>}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.letterDownloadBtn, { borderWidth: 1, borderColor: colors.border }]}
+                    disabled={!!letterExport}
+                    onPress={() => downloadLetter("word", match.coverLetter!, selectedJob)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Download cover letter as Word document"
+                  >
+                    {letterExport === "word"
+                      ? <ActivityIndicator size="small" color={colors.foreground} />
+                      : <Text style={[styles.letterDownloadText, { color: colors.foreground }]}>Download Word</Text>}
+                  </TouchableOpacity>
+                </View>
+              )}
               <TouchableOpacity
                 style={[styles.roadmapBtn, { backgroundColor: jobsColor + "15", borderColor: jobsColor + "30" }]}
                 onPress={() => { setSelectedJob(null); router.push("/(tabs)/roadmap"); }}
@@ -690,6 +732,11 @@ const styles = StyleSheet.create({
   gapRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 16, borderWidth: 1, marginBottom: 12 },
   gapIconWrap: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   gapText: { flex: 1, fontSize: 14, fontFamily: "Inter_500Medium", lineHeight: 20 },
+  letterDownloadBtn: {
+    flex: 1, alignItems: "center", justifyContent: "center",
+    paddingVertical: 12, borderRadius: 12,
+  },
+  letterDownloadText: { color: "#fff", fontSize: 14, fontWeight: "700" },
   coverBox: { borderRadius: 20, padding: 24, borderWidth: 1, marginBottom: 24 },
   coverText: { fontSize: 15, fontFamily: "Inter_500Medium", lineHeight: 26 },
   roadmapBtn: { flexDirection: "row", alignItems: "center", gap: 10, justifyContent: "center", paddingVertical: 16, borderRadius: 16, borderWidth: 1 },
