@@ -7,6 +7,7 @@ import { generateAllBDJobs } from "@/data/bdJobs";
 import { fetchLiveJobs } from "@/services/jobFeedService";
 import { computeJobMatch, type JobMatchResult } from "@/utils/jobMatch";
 import { useAuth } from "./AuthContext";
+import { useCV } from "./CVContext";
 import { chatJSON, isAIConfigured } from "@/services/aiClient";
 
 export interface JobListing {
@@ -151,12 +152,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   // Matches and applications belong to the role they were made for.
   const roleKey = user?.activeRoleId || "default";
-  // ── CV dependency, currently absent ────────────────────────────────────────
-  // Match scoring reads the candidate's skills from their CV. The CV engine is
-  // being rebuilt, so there are none and matches score against an empty skill
-  // set. Restore these two lines to read from the CV engine to reconnect.
-  const cvSkillsRaw: string[] = [];
-  const cvTextRaw = "";
+  // Match scoring compares the job's requirements against the skills the
+  // candidate's CV actually shows.
+  const { cv, skills: cvSkillsRaw } = useCV();
+  const cvTextRaw = cv?.rawText ?? "";
   const [matches, setMatches] = useState<ApplicationMatch[]>([]);
   const [appliedJobIds, setAppliedJobIds] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);

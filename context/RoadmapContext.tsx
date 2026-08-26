@@ -12,6 +12,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import AsyncStorage from "@/services/syncedStorage";
 import { useAuth } from "@/context/AuthContext";
+import { useCV } from "@/context/CVContext";
 import { generateRoadmap as generate, type Roadmap } from "@/services/roadmapAI";
 
 export type { Roadmap, Milestone } from "@/services/roadmapAI";
@@ -36,16 +37,12 @@ const RoadmapContext = createContext<RoadmapContextType | undefined>(undefined);
 
 export function RoadmapProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  // ── CV dependency, currently absent ────────────────────────────────────────
-  // The CV engine is being rebuilt. A roadmap is the gap between a CV and a
-  // target role, so with no CV there is nothing to measure: the screen stays on
-  // its "upload your CV" gate and generation never runs.
-  //
-  // To reconnect once the CV engine exists, restore these three lines to read
-  // from it — nothing else in this file needs to change.
-  const hasCv = false;
-  const cvText = "";
-  const cvSkills: string[] = [];
+  // The roadmap is the gap between this CV and the target role, so it reads
+  // both from the CV engine. Without a CV the screen stays on its gate.
+  const { cv, skills } = useCV();
+  const hasCv = !!cv?.rawText;
+  const cvText = cv?.rawText ?? "";
+  const cvSkills = skills;
 
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null);
   const [isLoading, setIsLoading] = useState(true);

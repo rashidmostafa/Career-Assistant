@@ -10,10 +10,11 @@
  * the format, so committing before that question is answered would mean scoring
  * against an assumption.
  */
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import * as DocumentPicker from "expo-document-picker";
 import { File } from "expo-file-system";
 import AsyncStorage from "@/services/syncedStorage";
+import { extractSkillsFromText } from "@/utils/skillsExtract";
 import { useAuth } from "@/context/AuthContext";
 import { extractCV, type CVFileKind } from "@/services/cvApi";
 import { scoreCV, type CVReport } from "@/services/cvAI";
@@ -72,6 +73,14 @@ function parseStoredCV(raw: string | null): CVDocument | null {
 
 interface CVContextType {
   cv: CVDocument | null;
+  /**
+   * Skills detected in the uploaded CV.
+   *
+   * Derived here rather than in each consumer so the roadmap and job matching
+   * work from the same list — two definitions of "what this candidate can do"
+   * would eventually disagree.
+   */
+  skills: string[];
   /** ATS report for the current CV, or null until it has been scored. */
   report: CVReport | null;
   isScoring: boolean;
@@ -105,6 +114,11 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
 
   const storageKey = user ? `cv_${user.id}` : null;
   const reportKey = user ? `cv_report_${user.id}` : null;
+
+  const skills = useMemo(
+    () => (cv?.rawText ? extractSkillsFromText(cv.rawText) : []),
+    [cv?.rawText],
+  );
 
   useEffect(() => {
     if (!storageKey) { setCv(null); setIsLoading(false); return; }
@@ -251,7 +265,7 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <CVContext.Provider
-      value={{ cv, report, isScoring, pending, isLoading, isUploading, error, pickAndExtract, confirmFormat, discardPending, clearCV, clearError, rescore }}
+      value={{ cv, skills, report, isScoring, pending, isLoading, isUploading, error, pickAndExtract, confirmFormat, discardPending, clearCV, clearError, rescore }}
     >
       {children}
     </CVContext.Provider>

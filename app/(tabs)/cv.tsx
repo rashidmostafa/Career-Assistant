@@ -19,6 +19,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -30,6 +31,7 @@ import type { CVIssue, CVReport } from "@/services/cvAI";
 export default function CVScreen() {
   const colors = useColors() as any;
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const {
     cv, report, isScoring, pending, isLoading, isUploading, error,
     pickAndExtract, confirmFormat, discardPending, clearError, rescore,
@@ -213,10 +215,9 @@ export default function CVScreen() {
               Checking it against how applicant tracking systems actually read a
               {" "}{cv.sourceFormat} CV.
             </Text>
-            {/* Roughly 25s warm, up to a minute if the server has gone idle —
-                worth saying, so a long wait does not read as a hang. */}
+            {/* A few seconds warm; longer only if the server has gone idle. */}
             <Text style={[styles.note, { color: colors.mutedForeground, textAlign: "center" }]}>
-              This usually takes about half a minute, and up to a minute the first time.
+              Usually a few seconds.
             </Text>
           </View>
         )}
@@ -236,7 +237,33 @@ export default function CVScreen() {
           </View>
         )}
 
-        {!!report && <Report report={report} accent={accent} colors={colors} isScoring={isScoring} onRescore={rescore} />}
+        {!!report && (
+          <>
+            <Report report={report} accent={accent} colors={colors} isScoring={isScoring} onRescore={rescore} />
+
+            {/* Step 5. A report that only names problems leaves the user with
+                nowhere to go; the roadmap is where the gaps get closed. */}
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 12 }]}>
+              <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
+                Want to raise this score?
+              </Text>
+              <Text style={[styles.sub, { color: colors.mutedForeground }]}>
+                {report.skillGaps.length > 0
+                  ? `Your roadmap turns these ${report.skillGaps.length} gaps into a plan built around what you already know.`
+                  : "Your roadmap builds a plan from the gap between this CV and your target role."}
+              </Text>
+              <Pressable
+                onPress={() => router.push("/(tabs)/roadmap" as any)}
+                style={({ pressed }) => [styles.cta, { backgroundColor: accent, opacity: pressed ? 0.85 : 1 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Go to your roadmap to improve this score"
+              >
+                <Feather name="trending-up" size={16} color="#fff" />
+                <Text style={styles.ctaText}>Upgrade my score</Text>
+              </Pressable>
+            </View>
+          </>
+        )}
 
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 8 }]}>
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>What we read</Text>
