@@ -1,4 +1,4 @@
-import { Edit2, X, LogOut, Check, Camera, Trash2, AlertTriangle, ChevronDown, ShieldCheck, ChevronRight, Briefcase, FileText, Map } from "lucide-react-native";
+import { Edit2, X, LogOut, Check, Camera, Trash2, AlertTriangle, ChevronDown, ShieldCheck, ChevronRight, Briefcase, FileText } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
@@ -20,7 +20,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/context/AuthContext";
 import { useCV } from "@/context/CVContext";
 import { useJobs } from "@/context/JobsContext";
-import { useRoadmap } from "@/context/RoadmapContext";
 import { useColors } from "@/hooks/useColors";
 import { showAlert } from "@/utils/alert";
 
@@ -150,7 +149,6 @@ export default function ProfileScreen() {
   const { user, signOut, updateUser, addTargetRole, removeTargetRole, setActiveRole } = useAuth();
   const { cvProfile, clearCV } = useCV();
   const { appliedJobIds } = useJobs();
-  const { roadmap, clearRoadmap } = useRoadmap();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name || "");
   const [targetRole, setTargetRole] = useState(user?.targetRole || "");
@@ -161,8 +159,6 @@ export default function ProfileScreen() {
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
 
-  const completedModules = roadmap?.modules.filter((m) => m.completed).length ?? 0;
-  const totalModules = roadmap?.modules.length ?? 0;
 
   const availableRoles = background ? getRolesForBackground(background) : [];
 
@@ -354,7 +350,6 @@ export default function ProfileScreen() {
           {[
             { label: "Jobs Applied", value: String(appliedJobIds.length), color: colors.jobs || "#7c3aed", icon: Briefcase },
             { label: "CV Score", value: cvProfile ? `${cvProfile.atsScore}` : "—", color: colors.cv || "#0891b2", icon: FileText },
-            { label: "Weeks Done", value: `${completedModules}/${totalModules || 12}`, color: colors.roadmap || "#059669", icon: Map },
           ].map((s) => (
             <View key={s.label} style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={[styles.statIconWrap, { backgroundColor: s.color + "15" }]}>

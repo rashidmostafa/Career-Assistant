@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, Map, FileText, Mic, TrendingUp, ChevronRight, Zap, Award } from "lucide-react-native";
+import { BriefcaseBusiness, Map, FileText, Mic, ChevronRight, Zap, Award } from "lucide-react-native";
 import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
@@ -17,7 +17,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/context/AuthContext";
 import { useCV } from "@/context/CVContext";
 import { useJobs } from "@/context/JobsContext";
-import { useRoadmap } from "@/context/RoadmapContext";
 import { useThemeMode } from "@/context/ThemeContext";
 import { useColors } from "@/hooks/useColors";
 
@@ -38,7 +37,6 @@ export default function HomeScreen() {
   const { user } = useAuth();
   const { cvProfile } = useCV();
   const { jobs, appliedJobIds } = useJobs();
-  const { roadmap } = useRoadmap();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
   const isDarkMode = resolvedTheme === "dark";
@@ -47,9 +45,6 @@ export default function HomeScreen() {
     await setThemeMode(isDarkMode ? "light" : "dark");
   };
 
-  const completedModules = roadmap?.modules.filter((m) => m.completed).length ?? 0;
-  const totalModules = roadmap?.modules.length ?? 12;
-  const progressPct = totalModules > 0 ? Math.round((completedModules / totalModules) * 100) : 0;
 
   const QUICK_ACTIONS: QuickAction[] = [
     {
@@ -70,8 +65,8 @@ export default function HomeScreen() {
     },
     {
       id: "roadmap",
-      label: "12-Week Roadmap",
-      description: roadmap ? `${progressPct}% complete · ${completedModules}/${totalModules} weeks` : "Generate your learning plan",
+      label: "Roadmap",
+      description: "Plan your path to your target role",
       icon: Map,
       color: colors.roadmap || "#059669",
       route: "/(tabs)/roadmap",
@@ -89,7 +84,6 @@ export default function HomeScreen() {
   const stats = [
     { label: "Jobs Applied", value: String(appliedJobIds.length), color: colors.primary },
     { label: "CV Score", value: cvProfile ? `${cvProfile.atsScore}` : "—", color: colors.cv || "#0891b2" },
-    { label: "Weeks Done", value: `${completedModules}/${totalModules}`, color: colors.roadmap || "#059669" },
     { label: "Matches", value: String(jobs.length), color: colors.jobs || "#7c3aed" },
   ];
 
@@ -204,30 +198,6 @@ export default function HomeScreen() {
           ))}
         </Animated.View>
 
-        {roadmap && (
-          <Animated.View entering={FadeInDown.duration(500).delay(440).springify().damping(14)} style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <TrendingUp size={18} color={colors.roadmap || "#059669"} strokeWidth={2.5} />
-              <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Roadmap Progress</Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.progressCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-              onPress={() => router.push("/(tabs)/roadmap" as any)}
-              activeOpacity={0.85}
-            >
-              <View style={styles.progressRow}>
-                <Text style={[styles.progressLabel, { color: colors.foreground }]}>{roadmap.title}</Text>
-                <Text style={[styles.progressPct, { color: colors.roadmap || "#059669" }]}>{progressPct}%</Text>
-              </View>
-              <View style={[styles.progressBar, { backgroundColor: colors.secondary }]}>
-                <View style={[styles.progressFill, { width: `${progressPct}%` as any, backgroundColor: colors.roadmap || "#059669" }]} />
-              </View>
-              <Text style={[styles.progressSub, { color: colors.mutedForeground }]}>
-                {completedModules} of {totalModules} weeks completed
-              </Text>
-            </TouchableOpacity>
-          </Animated.View>
-        )}
 
         {cvProfile && (
           <Animated.View entering={FadeInDown.duration(500).delay(500).springify().damping(14)} style={[styles.section, { paddingBottom: 8 }]}>

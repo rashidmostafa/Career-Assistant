@@ -12,7 +12,6 @@ import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { CVProvider } from "@/context/CVContext";
 import { JobsProvider } from "@/context/JobsContext";
 import { ThemeProvider } from "@/context/ThemeContext";
-import { RoadmapProvider } from "@/context/RoadmapContext";
 import { InterviewProvider } from "@/context/InterviewContext";
 import { PortfolioProvider } from "@/context/PortfolioContext";
 import { DialogProvider } from "@/components/ui/AppDialog";
@@ -164,7 +163,6 @@ function RootLayoutNav() {
   return (
     <CVProvider>
       <JobsProvider>
-        <RoadmapProvider>
           <InterviewProvider>
             <PortfolioProvider>
               <DialogProvider>
@@ -186,7 +184,6 @@ function RootLayoutNav() {
               </DialogProvider>
             </PortfolioProvider>
           </InterviewProvider>
-        </RoadmapProvider>
       </JobsProvider>
     </CVProvider>
   );

@@ -19,7 +19,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MatchBadge } from "@/components/MatchBadge";
 import { useJobs, type JobListing } from "@/context/JobsContext";
-import { useRoadmap } from "@/context/RoadmapContext";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { JOB_PLATFORMS, PLATFORM_CATEGORY_LABELS, BD_LOCATIONS, JOB_TYPES, JOB_EXPERIENCE_LEVELS, getPlatformSearchUrl, type JobPlatform, PlatformCategory } from "@/constants/jobPlatforms";
@@ -52,7 +51,6 @@ export default function JobsScreen() {
     usingFallback,
     refreshJobs,
   } = useJobs();
-  const { generateRoadmap } = useRoadmap();
   const [search, setSearch] = useState("");
   const [selectedJob, setSelectedJob] = useState<JobListing | null>(null);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
@@ -82,7 +80,6 @@ export default function JobsScreen() {
     try {
       const match = await generateCoverLetter(job);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      await generateRoadmap(match.gapAnalysis, user?.targetRole || job.title, user?.experienceLevel);
       setSelectedJob(job);
     } catch {
       showAlert("Error", "Could not generate cover letter. Try again.");

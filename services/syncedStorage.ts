@@ -60,10 +60,10 @@ async function canSync(): Promise<boolean> {
 }
 
 /**
- * Contexts store JSON strings, with one exception: RoadmapContext writes a bare
- * role name. Wrapping non-JSON values keeps the round trip exact instead of
- * throwing on parse, while genuine JSON is stored structured so it stays
- * readable in the GDPR export.
+ * Contexts store JSON strings, but not all of them: some write a bare string.
+ * Wrapping non-JSON values keeps the round trip exact instead of throwing on
+ * parse, while genuine JSON is stored structured so it stays readable in the
+ * GDPR export.
  */
 function encode(key: string, value: string): unknown {
   // The original key travels with the payload so hydrate() can restore each
