@@ -114,6 +114,18 @@ describe("validation and failure reporting", () => {
     expect(await generateRoadmap(input)).toEqual({ ok: false, reason: "unreachable" });
   });
 
+  it("does not retry an unreachable server", async () => {
+    mockChatJSON.mockResolvedValue(null);
+    await generateRoadmap(input);
+    expect(mockChatJSON).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives generation a budget that survives a cold server", async () => {
+    mockChatJSON.mockResolvedValue(reply([ms()]));
+    await generateRoadmap(input);
+    expect(mockChatJSON.mock.calls[0][1]?.timeoutMs).toBeGreaterThanOrEqual(90_000);
+  });
+
   it("reports no_ai without calling out at all", async () => {
     mockConfigured = false;
     expect(await generateRoadmap(input)).toEqual({ ok: false, reason: "no_ai" });

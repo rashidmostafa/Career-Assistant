@@ -213,6 +213,11 @@ export default function CVScreen() {
               Checking it against how applicant tracking systems actually read a
               {" "}{cv.sourceFormat} CV.
             </Text>
+            {/* Roughly 25s warm, up to a minute if the server has gone idle —
+                worth saying, so a long wait does not read as a hang. */}
+            <Text style={[styles.note, { color: colors.mutedForeground, textAlign: "center" }]}>
+              This usually takes about half a minute, and up to a minute the first time.
+            </Text>
           </View>
         )}
 

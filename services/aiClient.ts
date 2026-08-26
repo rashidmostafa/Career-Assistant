@@ -37,13 +37,16 @@ export const isAIConfigured = API_URL.length > 0;
  * reply was not usable JSON — callers treat null as "use the local fallback".
  * Retries and back-off now happen server-side in routes/ai.js.
  */
-export async function chatJSON(prompt: string): Promise<any | null> {
+export async function chatJSON(
+  prompt: string,
+  opts?: { timeoutMs?: number },
+): Promise<any | null> {
   if (!isAIConfigured) return null;
 
   try {
     const res = await apiFetch<{ data: any | null; reason?: string }>(
       "/api/ai/chat",
-      { method: "POST", body: JSON.stringify({ prompt }), timeoutMs: TIMEOUT_MS },
+      { method: "POST", body: JSON.stringify({ prompt }), timeoutMs: opts?.timeoutMs ?? TIMEOUT_MS },
       true,
     );
     if (res?.data == null) {

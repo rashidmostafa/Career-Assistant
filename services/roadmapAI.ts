@@ -202,6 +202,9 @@ export function validateRoadmap(raw: any, targetRole: string): Roadmap | null {
 }
 
 // ─── Generation ───────────────────────────────────────────────────────────────
+/** Same reasoning as scoring: a long generation plus a possible cold start. */
+const GENERATE_TIMEOUT_MS = 120_000;
+
 export type GenerateResult =
   | { ok: true; roadmap: Roadmap }
   | { ok: false; reason: "no_ai" | "unreachable" | "bad_output" };
@@ -225,11 +228,15 @@ export async function generateRoadmap(input: GenerateInput): Promise<GenerateRes
       attempt === 0
         ? base
         : `${base}\n\nYour previous reply was not valid JSON in the required shape. Return ONLY the JSON object.`,
+      { timeoutMs: GENERATE_TIMEOUT_MS },
     );
-    if (raw !== null) reached = true;
 
     const validated = validateRoadmap(raw, input.targetRole);
     if (validated) return { ok: true, roadmap: validated };
+
+    // Only a real but unusable answer is worth asking again for.
+    if (raw === null) return { ok: false, reason: "unreachable" };
+    reached = true;
   }
 
   return { ok: false, reason: reached ? "bad_output" : "unreachable" };

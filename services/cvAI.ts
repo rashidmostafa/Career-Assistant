@@ -176,6 +176,14 @@ export function validateReport(raw: any, input: ScoreInput): CVReport | null {
   };
 }
 
+/**
+ * Scoring a CV takes about 25 seconds against a warm server, and the free tier
+ * spins down after 15 minutes idle — so a cold instance adds roughly another
+ * 22s before the model is even reached. A 45s budget failed on exactly that
+ * combination, which is the common case for the first score of a session.
+ */
+const SCORE_TIMEOUT_MS = 120_000;
+
 export type ScoreResult =
   | { ok: true; report: CVReport }
   | { ok: false; reason: "no_ai" | "unreachable" | "bad_output" };
@@ -190,10 +198,17 @@ export async function scoreCV(input: ScoreInput): Promise<ScoreResult> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const raw = await chatJSON(
       attempt === 0 ? base : `${base}\n\nYour previous reply was not valid JSON in the required shape. Return ONLY the JSON object.`,
+      { timeoutMs: SCORE_TIMEOUT_MS },
     );
-    if (raw !== null) reached = true;
+
     const report = validateReport(raw, input);
     if (report) return { ok: true, report };
+
+    // Retry only when the model actually answered and the answer was unusable.
+    // Retrying an unreachable server just makes the user wait the whole budget
+    // twice before being told the same thing.
+    if (raw === null) return { ok: false, reason: "unreachable" };
+    reached = true;
   }
   return { ok: false, reason: reached ? "bad_output" : "unreachable" };
 }

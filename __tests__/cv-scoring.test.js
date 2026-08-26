@@ -108,6 +108,21 @@ describe("failure reporting", () => {
     expect(await scoreCV(input)).toEqual({ ok: false, reason: "unreachable" });
   });
 
+  it("does not retry an unreachable server", async () => {
+    // Retrying a timeout makes the user wait the whole budget twice to be told
+    // the same thing. Only a real but unusable answer is worth asking again for.
+    mockChatJSON.mockResolvedValue(null);
+    await scoreCV(input);
+    expect(mockChatJSON).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives scoring a budget that survives a cold server", async () => {
+    mockChatJSON.mockResolvedValue(fullReply);
+    await scoreCV(input);
+    // ~25s of generation plus ~22s of Render cold start must fit.
+    expect(mockChatJSON.mock.calls[0][1]?.timeoutMs).toBeGreaterThanOrEqual(90_000);
+  });
+
   it("reports no_ai without calling out", async () => {
     mockConfigured = false;
     expect(await scoreCV(input)).toEqual({ ok: false, reason: "no_ai" });
