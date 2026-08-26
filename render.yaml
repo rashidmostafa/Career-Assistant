@@ -106,8 +106,12 @@ services:
       # dashboard edit now, not an app rebuild.
       - key: AI_BASE_URL
         value: https://generativelanguage.googleapis.com/v1beta/openai
+      # The free tier gives only 20 requests/day on gemini-3.6-flash, which one
+      # testing session exhausts. This lite model has a much larger allowance
+      # and measured no worse on CV scoring or roadmap generation, at ~5x the
+      # speed. Change here and in routes/ai.js together.
       - key: AI_MODEL
-        value: gemini-3.6-flash
+        value: gemini-3.5-flash-lite
 
       # ── Hawk (self-hosted fine-tuned model) ──────────────────────────────
       # Public URL of serve_hawk.py — a tunnel to the GPU box, or a host.

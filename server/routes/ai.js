@@ -29,7 +29,15 @@ const { aiLimiter }    = require("../middleware/rateLimiter");
 // ── General LLM ───────────────────────────────────────────────────────────────
 const AI_API_KEY   = process.env.AI_API_KEY ?? "";
 const AI_BASE_URL  = (process.env.AI_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta/openai").replace(/\/$/, "");
-const AI_MODEL     = process.env.AI_MODEL ?? "gemini-3.6-flash";
+// gemini-3.5-flash-lite, not gemini-3.6-flash.
+//
+// The free tier allows only 20 requests per DAY against 3.6-flash, which a
+// single session of testing exhausts — after which every feature reports being
+// unable to reach the AI. The lite model has a far more generous allowance and,
+// measured on the same prompts, is no worse: it scored a CV in 3.8s instead of
+// 24s and caught the same reverse-chronological and misplaced-section faults,
+// and generated a roadmap in 4.8s with correctly varied estimates.
+const AI_MODEL     = process.env.AI_MODEL ?? "gemini-3.5-flash-lite";
 // 120s, not 30s. Scoring a CV and generating a roadmap are long generations —
 // measured at 24-26 seconds against a warm provider — so a 30s ceiling left
 // about four seconds of margin and aborted on any variance. The client then
