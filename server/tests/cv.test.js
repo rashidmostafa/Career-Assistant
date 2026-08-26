@@ -89,3 +89,59 @@ describe("POST /api/cv/extract", () => {
     expect(res.status).toBe(413);
   }, 30000);
 });
+
+describe("POST /api/cv/export", () => {
+  const CV = `RASHID MOSTAFA
+Dhaka, Bangladesh
+
+PROFESSIONAL SUMMARY
+Backend Engineer with 2 years of experience building REST APIs.
+
+EXPERIENCE
+Software Engineer, Acme Ltd (2024 - 2026)
+- Built a REST API serving 10,000 requests per day
+- Raised Jest coverage from 12% to 68%
+
+SKILLS
+JavaScript, Node.js, MongoDB`;
+
+  it("requires authentication", async () => {
+    expect((await request(app).post("/api/cv/export").send({ text: CV })).status).toBe(401);
+  });
+
+  it("produces a real .docx, not HTML with a Word extension", async () => {
+    const res = await auth(request(app).post("/api/cv/export")).send({ text: CV });
+    expect(res.status).toBe(200);
+    expect(res.body.extension).toBe("docx");
+
+    const buf = Buffer.from(res.body.fileBase64, "base64");
+    // A .docx is a zip; the rename trick would start with "<".
+    expect(buf[0]).toBe(0x50);
+    expect(buf[1]).toBe(0x4b);
+  }, 30000);
+
+  it("keeps the content, and the structure, through a real Word parser", async () => {
+    const res = await auth(request(app).post("/api/cv/export")).send({ text: CV });
+    const buf = Buffer.from(res.body.fileBase64, "base64");
+
+    const mammoth = require("mammoth");
+    const text = (await mammoth.extractRawText({ buffer: buf })).value;
+    expect(text).toContain("RASHID MOSTAFA");
+    expect(text).toContain("10,000 requests");
+    expect(text).toContain("University of Dhaka".slice(0, 0) + "MongoDB");
+
+    // Headings and bullets must be real Word structures, or the document is
+    // not editable in the way someone sending it to an employer expects.
+    const html = (await mammoth.convertToHtml({ buffer: buf })).value;
+    expect(html).toMatch(/<h2>/);
+    expect(html).toMatch(/<li>/);
+  }, 30000);
+
+  it("refuses an empty export", async () => {
+    expect((await auth(request(app).post("/api/cv/export")).send({ text: "short" })).status).toBe(400);
+  });
+
+  it("refuses an oversized export", async () => {
+    expect((await auth(request(app).post("/api/cv/export")).send({ text: "x".repeat(70_000) })).status).toBe(413);
+  });
+});

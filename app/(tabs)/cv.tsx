@@ -26,6 +26,8 @@ import * as Haptics from "expo-haptics";
 
 import { useColors } from "@/hooks/useColors";
 import { useCV, CV_FORMATS } from "@/context/CVContext";
+import { exportAsPdf, exportAsWord } from "@/services/cvExport";
+import { showAlert } from "@/utils/alert";
 import type { CVIssue, CVReport } from "@/services/cvAI";
 
 export default function CVScreen() {
@@ -48,6 +50,7 @@ export default function CVScreen() {
   // often best rewritten into another for a given employer.
   const [outChoice, setOutChoice] = useState<string | null>(null);
   const [outOther, setOutOther] = useState("");
+  const [exporting, setExporting] = useState<"pdf" | "word" | null>(null);
 
   const upload = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -66,6 +69,20 @@ export default function CVScreen() {
   };
 
   const canConfirm = choice === "Other" ? otherFormat.trim().length > 0 : !!choice;
+
+  const download = async (kind: "pdf" | "word") => {
+    if (!optimised || exporting) return;
+    setExporting(kind);
+    try {
+      const result = kind === "pdf"
+        ? await exportAsPdf(optimised.text)
+        : await exportAsWord(optimised.text);
+      if (!result.ok) showAlert("Couldn't save your CV", result.message);
+      else Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } finally {
+      setExporting(null);
+    }
+  };
 
   const UploadButton = ({ label }: { label: string }) => (
     <Pressable
@@ -374,11 +391,43 @@ export default function CVScreen() {
                   <Text style={[styles.optimisedText, { color: colors.foreground }]} selectable>
                     {optimised.text}
                   </Text>
-                  <View style={[styles.next, { borderColor: colors.border }]}>
-                    <Feather name="download" size={15} color={colors.mutedForeground} />
-                    <Text style={[styles.sub, { color: colors.mutedForeground, flex: 1 }]}>
-                      PDF and Word download comes next.
-                    </Text>
+                  {/* Step 7 — download. Both open the share sheet, since a
+                      phone has no visible downloads folder to point at. */}
+                  <View style={styles.row}>
+                    <Pressable
+                      onPress={() => download("pdf")}
+                      disabled={!!exporting}
+                      style={({ pressed }) => [
+                        styles.downloadBtn,
+                        { backgroundColor: accent, opacity: exporting ? 0.6 : pressed ? 0.85 : 1 },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Download as PDF"
+                    >
+                      {exporting === "pdf"
+                        ? <ActivityIndicator size="small" color="#fff" />
+                        : <>
+                            <Feather name="file-text" size={15} color="#fff" />
+                            <Text style={styles.ctaText}>PDF</Text>
+                          </>}
+                    </Pressable>
+                    <Pressable
+                      onPress={() => download("word")}
+                      disabled={!!exporting}
+                      style={({ pressed }) => [
+                        styles.downloadBtn,
+                        { borderColor: colors.border, borderWidth: 1, opacity: exporting ? 0.6 : pressed ? 0.85 : 1 },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Download as Word document"
+                    >
+                      {exporting === "word"
+                        ? <ActivityIndicator size="small" color={colors.foreground} />
+                        : <>
+                            <Feather name="file" size={15} color={colors.foreground} />
+                            <Text style={[styles.ctaText, { color: colors.foreground }]}>Word</Text>
+                          </>}
+                    </Pressable>
                   </View>
                 </>
               )}
@@ -585,4 +634,8 @@ const styles = StyleSheet.create({
   gapSkill: { fontSize: 14, fontWeight: "700" },
   optimisedText: { fontSize: 12, lineHeight: 19, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" },
   label: { fontSize: 10, fontWeight: "800", letterSpacing: 0.9 },
+  downloadBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 8, paddingVertical: 12, borderRadius: 12,
+  },
 });

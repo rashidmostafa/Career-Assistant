@@ -14,6 +14,7 @@ const express  = require("express");
 const router   = express.Router();
 const mammoth  = require("mammoth");
 const { PDFParse } = require("pdf-parse");
+const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = require("docx");
 const { authenticate } = require("../middleware/authMiddleware");
 const { aiLimiter }    = require("../middleware/rateLimiter");
 
@@ -119,6 +120,109 @@ router.post("/extract", authenticate, aiLimiter, async (req, res, next) => {
     }
 
     res.json({ text, chars: text.length, kind, readability: quality });
+  } catch (e) {
+    next(e);
+  }
+});
+
+
+// ─── Export ───────────────────────────────────────────────────────────────────
+/**
+ * Turns the optimised CV's plain text into a real .docx.
+ *
+ * Generated server-side with the `docx` package rather than by renaming an HTML
+ * file to .doc — the rename trick opens in Word but carries HTML artefacts and
+ * cannot be edited cleanly, which matters for a document the user is about to
+ * send to an employer. PDF stays on the device, where expo-print already
+ * produces a good one without an upload.
+ */
+const MAX_EXPORT_CHARS = 60_000;
+
+/**
+ * Infers structure from the plain text the model produced.
+ *
+ * A CV has no markup, so the shape has to be read from convention: a short
+ * all-caps line is a section heading, a leading bullet or dash is a list item,
+ * and the first line is the candidate's name.
+ */
+function toParagraphs(text) {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const paragraphs = [];
+  let isFirstContentLine = true;
+
+  for (const raw of lines) {
+    const line = raw.trim();
+
+    if (!line) {
+      paragraphs.push(new Paragraph({ text: "" }));
+      continue;
+    }
+
+    if (isFirstContentLine) {
+      isFirstContentLine = false;
+      paragraphs.push(new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [new TextRun({ text: line, bold: true, size: 32 })],
+      }));
+      continue;
+    }
+
+    // Section heading: short, and written in caps.
+    const isHeading = line.length <= 48 && line === line.toUpperCase() && /[A-Z]/.test(line);
+    if (isHeading) {
+      paragraphs.push(new Paragraph({
+        heading: HeadingLevel.HEADING_2,
+        spacing: { before: 220, after: 90 },
+        children: [new TextRun({ text: line, bold: true, size: 24 })],
+      }));
+      continue;
+    }
+
+    const bullet = line.match(/^[-•*]\s+(.*)$/);
+    if (bullet) {
+      paragraphs.push(new Paragraph({
+        bullet: { level: 0 },
+        children: [new TextRun({ text: bullet[1], size: 22 })],
+      }));
+      continue;
+    }
+
+    paragraphs.push(new Paragraph({ children: [new TextRun({ text: line, size: 22 })] }));
+  }
+
+  return paragraphs;
+}
+
+/**
+ * POST /api/cv/export
+ * Body: { text }
+ * → { fileBase64, mimeType, extension }
+ */
+router.post("/export", authenticate, async (req, res, next) => {
+  try {
+    const { text } = req.body ?? {};
+    if (typeof text !== "string" || text.trim().length < 40) {
+      return res.status(400).json({ message: "Nothing to export." });
+    }
+    if (text.length > MAX_EXPORT_CHARS) {
+      return res.status(413).json({ message: "That CV is too long to export." });
+    }
+
+    const doc = new Document({
+      creator: "Career Assistant",
+      title: "Curriculum Vitae",
+      sections: [{
+        properties: { page: { margin: { top: 720, bottom: 720, left: 720, right: 720 } } },
+        children: toParagraphs(text),
+      }],
+    });
+
+    const buffer = await Packer.toBuffer(doc);
+    res.json({
+      fileBase64: buffer.toString("base64"),
+      mimeType: SUPPORTED.docx,
+      extension: "docx",
+    });
   } catch (e) {
     next(e);
   }

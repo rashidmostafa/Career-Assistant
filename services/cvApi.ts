@@ -49,3 +49,40 @@ export async function extractCV(params: {
     };
   }
 }
+
+
+export interface ExportedFile {
+  fileBase64: string;
+  mimeType: string;
+  extension: string;
+}
+
+export type ExportResult =
+  | { ok: true; data: ExportedFile }
+  | { ok: false; message: string };
+
+/**
+ * Builds a real .docx from the optimised CV.
+ *
+ * Generated on the server: producing a genuine Word document needs a library
+ * that would otherwise be shipped to the phone, and the common shortcut —
+ * renaming an HTML file to .doc — opens with artefacts and cannot be edited
+ * cleanly, which matters for a document about to be sent to an employer.
+ *
+ * PDF is not here: expo-print produces a good one on the device with no upload.
+ */
+export async function exportCVAsDocx(text: string): Promise<ExportResult> {
+  try {
+    const data = await apiFetch<ExportedFile>(
+      "/api/cv/export",
+      { method: "POST", body: JSON.stringify({ text }), timeoutMs: 60_000 },
+      true,
+    );
+    return { ok: true, data };
+  } catch (e: any) {
+    return {
+      ok: false,
+      message: e?.message && e?.status ? e.message : "Couldn't build the Word file. Try again.",
+    };
+  }
+}
