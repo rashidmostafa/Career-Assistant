@@ -18,7 +18,6 @@ import {
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/context/AuthContext";
-import { useCV } from "@/context/CVContext";
 import { useJobs } from "@/context/JobsContext";
 import { useColors } from "@/hooks/useColors";
 import { showAlert } from "@/utils/alert";
@@ -147,7 +146,6 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, signOut, updateUser, addTargetRole, removeTargetRole, setActiveRole } = useAuth();
-  const { cvProfile, clearCV } = useCV();
   const { appliedJobIds } = useJobs();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name || "");
@@ -349,7 +347,6 @@ export default function ProfileScreen() {
         <Animated.View entering={FadeInDown.duration(500).delay(80).springify().damping(14)} style={styles.statsGrid}>
           {[
             { label: "Jobs Applied", value: String(appliedJobIds.length), color: colors.jobs || "#7c3aed", icon: Briefcase },
-            { label: "CV Score", value: cvProfile ? `${cvProfile.atsScore}` : "—", color: colors.cv || "#0891b2", icon: FileText },
           ].map((s) => (
             <View key={s.label} style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={[styles.statIconWrap, { backgroundColor: s.color + "15" }]}>

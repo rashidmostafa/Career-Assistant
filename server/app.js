@@ -38,6 +38,7 @@ require("dotenv").config();
  *   GET    /api/data/:namespace       (authenticated)
  *   PUT    /api/data/:namespace       (authenticated)
  *   DELETE /api/data/:namespace       (authenticated)
+ *   POST   /api/cv/extract            (authenticated)  PDF/DOCX -> text
  *   GET    /health
  */
 const express    = require("express");
@@ -53,6 +54,7 @@ const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
 const aiRoutes   = require("./routes/ai");
 const dataRoutes = require("./routes/data");
+const cvRoutes   = require("./routes/cv");
 const { startDeletionWorker } = require("./services/deletionWorker");
 
 const app  = express();
@@ -108,7 +110,9 @@ app.use((req, res, next) => {
 });
 
 // ── Body parsing ──────────────────────────────────────────────────────────────
-app.use(express.json({ limit: "1mb" }));
+// 12mb, not 1mb: CV uploads arrive base64-encoded, which inflates a file by
+// about a third, and routes/cv.js caps the decoded file at 8MB itself.
+app.use(express.json({ limit: "12mb" }));
 app.use(express.urlencoded({ extended: false }));
 
 // ── Trust proxy (Heroku/Render/Railway) ───────────────────────────────────────
@@ -158,6 +162,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/ai",   aiRoutes);
 app.use("/api/data", dataRoutes);
+app.use("/api/cv",   cvRoutes);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ message: "Not found." }));

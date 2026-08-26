@@ -12,7 +12,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import AsyncStorage from "@/services/syncedStorage";
 import { useAuth } from "@/context/AuthContext";
-import { useCV } from "@/context/CVContext";
 import { generateRoadmap as generate, type Roadmap } from "@/services/roadmapAI";
 
 export type { Roadmap, Milestone } from "@/services/roadmapAI";
@@ -37,7 +36,16 @@ const RoadmapContext = createContext<RoadmapContextType | undefined>(undefined);
 
 export function RoadmapProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const { cvProfile } = useCV();
+  // ── CV dependency, currently absent ────────────────────────────────────────
+  // The CV engine is being rebuilt. A roadmap is the gap between a CV and a
+  // target role, so with no CV there is nothing to measure: the screen stays on
+  // its "upload your CV" gate and generation never runs.
+  //
+  // To reconnect once the CV engine exists, restore these three lines to read
+  // from it — nothing else in this file needs to change.
+  const hasCv = false;
+  const cvText = "";
+  const cvSkills: string[] = [];
 
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -48,7 +56,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
 
   // Prerequisites, in the order the user can act on them.
   const blocker: RoadmapBlocker =
-    !cvProfile?.rawText ? "no_cv"
+    !hasCv ? "no_cv"
     : !targetRole ? "no_target_role"
     : null;
 
@@ -81,8 +89,8 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
     try {
       const result = await generate({
         targetRole,
-        cvText: cvProfile?.rawText ?? "",
-        cvSkills: cvProfile?.skills ?? [],
+        cvText,
+        cvSkills,
         experienceLevel: user.experienceLevel || undefined,
       });
 
@@ -104,7 +112,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsGenerating(false);
     }
-  }, [user, blocker, targetRole, cvProfile, storageKey]);
+  }, [user, blocker, targetRole, cvText, cvSkills, storageKey]);
 
   const clear = useCallback(async () => {
     setRoadmap(null);

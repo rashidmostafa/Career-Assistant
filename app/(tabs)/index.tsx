@@ -15,7 +15,6 @@ import {
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/context/AuthContext";
-import { useCV } from "@/context/CVContext";
 import { useJobs } from "@/context/JobsContext";
 import { useThemeMode } from "@/context/ThemeContext";
 import { useColors } from "@/hooks/useColors";
@@ -35,7 +34,6 @@ export default function HomeScreen() {
   const router = useRouter();
   const { resolvedTheme, setThemeMode } = useThemeMode();
   const { user } = useAuth();
-  const { cvProfile } = useCV();
   const { jobs, appliedJobIds } = useJobs();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
@@ -58,7 +56,7 @@ export default function HomeScreen() {
     {
       id: "cv",
       label: "CV Engine",
-      description: cvProfile ? `ATS Score: ${cvProfile.atsScore}/100` : "Analyze & optimize your CV",
+      description: "Analyze & optimize your CV",
       icon: FileText,
       color: colors.cv || "#0891b2",
       route: "/(tabs)/cv",
@@ -83,7 +81,6 @@ export default function HomeScreen() {
 
   const stats = [
     { label: "Jobs Applied", value: String(appliedJobIds.length), color: colors.primary },
-    { label: "CV Score", value: cvProfile ? `${cvProfile.atsScore}` : "—", color: colors.cv || "#0891b2" },
     { label: "Matches", value: String(jobs.length), color: colors.jobs || "#7c3aed" },
   ];
 
@@ -199,28 +196,6 @@ export default function HomeScreen() {
         </Animated.View>
 
 
-        {cvProfile && (
-          <Animated.View entering={FadeInDown.duration(500).delay(500).springify().damping(14)} style={[styles.section, { paddingBottom: 8 }]}>
-            <View style={styles.sectionHeader}>
-              <Award size={18} color={colors.cv || "#0891b2"} strokeWidth={2.5} />
-              <Text style={[styles.sectionTitle, { color: colors.foreground }]}>CV Status</Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.cvCard, { backgroundColor: colors.card, borderColor: colors.cv ? colors.cv + "40" : colors.border, borderWidth: 1.5 }]}
-              onPress={() => router.push("/(tabs)/cv" as any)}
-              activeOpacity={0.85}
-            >
-              <View>
-                <Text style={[styles.cvScore, { color: colors.cv || "#0891b2" }]}>{cvProfile.atsScore}<Text style={[styles.cvScoreMax, { color: colors.mutedForeground }]}>/100</Text></Text>
-                <Text style={[styles.cvLabel, { color: colors.foreground }]}>ATS Score</Text>
-                <Text style={[styles.cvNote, { color: colors.mutedForeground }]}>
-                  {cvProfile.atsScore >= 80 ? "Ready to apply · Excellent ATS optimization" : cvProfile.atsScore >= 60 ? "Good · Minor improvements suggested" : "Review suggestions to improve score"}
-                </Text>
-              </View>
-              <ChevronRight size={20} color={colors.cv || "#0891b2"} />
-            </TouchableOpacity>
-          </Animated.View>
-        )}
       </ScrollView>
     </View>
   );

@@ -9,7 +9,6 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { KeyboardProviderCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
-import { CVProvider } from "@/context/CVContext";
 import { JobsProvider } from "@/context/JobsContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { InterviewProvider } from "@/context/InterviewContext";
@@ -162,7 +161,6 @@ function RootLayoutNav() {
   };
 
   return (
-    <CVProvider>
       <JobsProvider>
           <InterviewProvider>
             <RoadmapProvider>
@@ -188,7 +186,6 @@ function RootLayoutNav() {
             </RoadmapProvider>
           </InterviewProvider>
       </JobsProvider>
-    </CVProvider>
   );
 }
 

@@ -7,7 +7,6 @@ import { generateAllBDJobs } from "@/data/bdJobs";
 import { fetchLiveJobs } from "@/services/jobFeedService";
 import { computeJobMatch, type JobMatchResult } from "@/utils/jobMatch";
 import { useAuth } from "./AuthContext";
-import { useCV } from "./CVContext";
 import { chatJSON, isAIConfigured } from "@/services/aiClient";
 
 export interface JobListing {
@@ -152,7 +151,12 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   // Matches and applications belong to the role they were made for.
   const roleKey = user?.activeRoleId || "default";
-  const { cvProfile } = useCV();
+  // ── CV dependency, currently absent ────────────────────────────────────────
+  // Match scoring reads the candidate's skills from their CV. The CV engine is
+  // being rebuilt, so there are none and matches score against an empty skill
+  // set. Restore these two lines to read from the CV engine to reconnect.
+  const cvSkillsRaw: string[] = [];
+  const cvTextRaw = "";
   const [matches, setMatches] = useState<ApplicationMatch[]>([]);
   const [appliedJobIds, setAppliedJobIds] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -233,7 +237,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => { refreshJobs(); }, [refreshJobs]);
 
-  const cvSkills = useMemo(() => cvProfile?.skills ?? [], [cvProfile?.skills]);
+  const cvSkills = useMemo(() => cvSkillsRaw, [cvSkillsRaw]);
   const hasCVSkills = cvSkills.length > 0;
 
   const allRoleJobs = useMemo(() => {
@@ -266,7 +270,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     setIsGenerating(true);
     try {
       const apiKey = isAIConfigured;
-      const cvText = cvProfile?.fullOptimizedCV || cvProfile?.rawText || "";
+      const cvText = cvTextRaw;
       let coverLetter = `Dear Hiring Manager,\n\nI am excited to apply for the ${job.title} position at ${job.company}. With my background in ${user.targetRole || "software engineering"} and ${user.experienceLevel} of experience, I am confident in my ability to make a meaningful contribution.\n\nThe opportunity at ${job.company} particularly excites me because of ${job.description.split(".")[0].toLowerCase()}. I bring expertise in ${job.requiredSkills.slice(0, 3).join(", ")}, which directly aligns with your requirements.\n\nI would welcome the opportunity to discuss how I can contribute to ${job.company}'s mission.\n\nBest regards,\n${user.name}`;
       let gapAnalysis = job.requiredSkills.slice(0, 3).map((skill) => `Strengthen your ${skill} skills to stand out for this role`);
 
