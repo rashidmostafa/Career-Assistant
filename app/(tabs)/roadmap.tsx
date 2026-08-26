@@ -19,6 +19,7 @@ import {
   Text,
   View,
 } from "react-native";
+import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -26,7 +27,7 @@ import * as Haptics from "expo-haptics";
 
 import { useColors } from "@/hooks/useColors";
 import { useRoadmap } from "@/context/RoadmapContext";
-import type { Milestone } from "@/services/roadmapAI";
+import type { Milestone, RoadmapResource } from "@/services/roadmapAI";
 
 export default function RoadmapScreen() {
   const colors = useColors() as any;
@@ -245,7 +246,7 @@ function MilestoneRow({ milestone, index, accent, colors }: {
           </View>
         )}
         <Block title="ACTIONS" items={milestone.actions} />
-        <Block title="RESOURCES" items={milestone.resources} />
+        <Resources items={milestone.resources} accent={accent} colors={colors} />
         {!!milestone.successCriteria && (
           <View style={{ gap: 6 }}>
             <Text style={[styles.label, { color: colors.mutedForeground }]}>YOU'RE DONE WHEN</Text>
@@ -253,6 +254,61 @@ function MilestoneRow({ milestone, index, accent, colors }: {
           </View>
         )}
       </View>
+    </View>
+  );
+}
+
+/**
+ * Resources, opened in the device browser.
+ *
+ * A resource without a usable URL still renders — as plain text rather than a
+ * dead tappable row. The model is asked to omit a URL it is unsure of instead
+ * of guessing, so this case is expected rather than exceptional.
+ */
+function Resources({ items, accent, colors }: {
+  items: RoadmapResource[]; accent: string; colors: any;
+}) {
+  if (items.length === 0) return null;
+
+  const open = async (r: RoadmapResource) => {
+    if (!r.url) return;
+    try {
+      await Linking.openURL(r.url);
+    } catch {
+      // Nothing on the device could open it; leaving the row inert is better
+      // than an error the user cannot act on.
+    }
+  };
+
+  const host = (url: string) => {
+    try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; }
+  };
+
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={[styles.label, { color: colors.mutedForeground }]}>RESOURCES</Text>
+      {items.map((r, i) =>
+        r.url ? (
+          <Pressable
+            key={`${r.title}-${i}`}
+            onPress={() => open(r)}
+            style={({ pressed }) => [styles.resourceRow, { borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}
+            accessibilityRole="link"
+            accessibilityLabel={`${r.title}, opens ${host(r.url)} in your browser`}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.text, { color: colors.foreground }]}>{r.title}</Text>
+              <Text style={[styles.resourceHost, { color: accent }]}>{host(r.url)}</Text>
+            </View>
+            <Feather name="external-link" size={15} color={accent} />
+          </Pressable>
+        ) : (
+          <View key={`${r.title}-${i}`} style={styles.bulletRow}>
+            <Text style={[styles.bullet, { color: accent }]}>•</Text>
+            <Text style={[styles.text, { color: colors.foreground, flex: 1 }]}>{r.title}</Text>
+          </View>
+        )
+      )}
     </View>
   );
 }
@@ -285,6 +341,11 @@ const styles = StyleSheet.create({
   chip: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 8, borderWidth: 1 },
   chipText: { fontSize: 12, fontWeight: "600" },
   bulletRow: { flexDirection: "row", gap: 8 },
+  resourceRow: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    paddingVertical: 9, paddingHorizontal: 11, borderRadius: 10, borderWidth: 1,
+  },
+  resourceHost: { fontSize: 11, fontWeight: "600", marginTop: 2 },
   bullet: { fontSize: 14, lineHeight: 21, fontWeight: "700" },
   inlineBusy: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12 },
 });

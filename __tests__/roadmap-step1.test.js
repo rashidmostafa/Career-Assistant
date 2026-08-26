@@ -12,7 +12,8 @@ const { generateRoadmap, validateRoadmap } = require("../services/roadmapAI");
 
 const ms = (over = {}) => ({
   id: "m1", title: "Learn Docker", why: "every posting lists it",
-  skills: ["Docker"], actions: ["Containerise an app"], resources: ["Docker docs"],
+  skills: ["Docker"], actions: ["Containerise an app"],
+  resources: [{ title: "Docker docs", url: "https://docs.docker.com" }],
   success_criteria: "You can ship a container", estimate: "~1 week", ...over,
 });
 
@@ -117,5 +118,54 @@ describe("validation and failure reporting", () => {
     mockConfigured = false;
     expect(await generateRoadmap(input)).toEqual({ ok: false, reason: "no_ai" });
     expect(mockChatJSON).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("resources carry openable URLs", () => {
+  const resourcesOf = (list) =>
+    validateRoadmap({ milestones: [ms({ resources: list })] }, "X").milestones[0].resources;
+
+  it("keeps a real https URL", () => {
+    expect(resourcesOf([{ title: "MDN", url: "https://developer.mozilla.org" }]))
+      .toEqual([{ title: "MDN", url: "https://developer.mozilla.org/" }]);
+  });
+
+  it("drops the link but keeps the title when the URL is unusable", () => {
+    for (const bad of ["not a url", "docs.docker.com", "/relative/path", ""]) {
+      const [r] = resourcesOf([{ title: "Docker docs", url: bad }]);
+      expect(r.title).toBe("Docker docs");
+      expect(r.url).toBe("");
+    }
+  });
+
+  it("refuses non-http schemes", () => {
+    expect(resourcesOf([{ title: "X", url: "javascript:alert(1)" }])[0].url).toBe("");
+    expect(resourcesOf([{ title: "X", url: "file:///etc/passwd" }])[0].url).toBe("");
+  });
+
+  it("rejects placeholder hosts a model reaches for when it has nothing real", () => {
+    for (const bad of ["https://example.com/course", "https://yoursite.com/x", "https://test.com"]) {
+      expect(resourcesOf([{ title: "Course", url: bad }])[0].url).toBe("");
+    }
+  });
+
+  it("still accepts the bare strings older roadmaps stored", () => {
+    expect(resourcesOf(["Docker docs", "Kubernetes in Action"]))
+      .toEqual([{ title: "Docker docs", url: "" }, { title: "Kubernetes in Action", url: "" }]);
+  });
+
+  it("drops resources with no title at all", () => {
+    expect(resourcesOf([{ url: "https://docs.docker.com" }, { title: "Real", url: "" }]))
+      .toEqual([{ title: "Real", url: "" }]);
+  });
+
+  it("asks the model for stable URLs and forbids inventing them", async () => {
+    mockChatJSON.mockResolvedValue(reply([ms()]));
+    await generateRoadmap(input);
+    const prompt = mockChatJSON.mock.calls[0][0];
+    expect(prompt).toMatch(/real, working URL/i);
+    expect(prompt).toMatch(/Never invent a URL/i);
+    expect(prompt).toMatch(/empty url/i);
   });
 });

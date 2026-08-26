@@ -12,6 +12,19 @@
 import { chatJSON, isAIConfigured } from "./aiClient";
 
 // ─── Model ────────────────────────────────────────────────────────────────────
+/**
+ * A resource the user can actually open.
+ *
+ * `url` may be empty: models invent plausible-looking URLs freely, so anything
+ * that does not survive validation keeps its title and loses its link rather
+ * than sending someone to a 404. A resource with no link is still useful — it
+ * is a name they can search for.
+ */
+export interface RoadmapResource {
+  title: string;
+  url: string;
+}
+
 export interface Milestone {
   id: string;
   title: string;
@@ -20,7 +33,7 @@ export interface Milestone {
   /** The gap skills this milestone closes. */
   skills: string[];
   actions: string[];
-  resources: string[];
+  resources: RoadmapResource[];
   successCriteria: string;
   /**
    * Honest effort for THIS skill — "~4 days", "~3 weeks".
@@ -58,6 +71,8 @@ Rules:
 - Give every milestone its own honest time estimate, based on how long that specific skill genuinely takes to reach working competence. Estimates must differ from each other — a small library is days, a new language or a production system is weeks or months. Never make them uniform and never round them to fit a tidy total.
 - Do not give an overall timeline, a deadline, a start date or an end date. Only per-milestone estimates.
 - Choose however many milestones the real gap needs. A near-ready candidate may need three; a career changer may need a dozen.
+- Every resource must have a real, working URL on a well-known site that has been stable for years — official documentation, MDN, freeCodeCamp, Coursera, edX, Khan Academy, a university course page, a publisher's book page, or a project's own GitHub repository. Link to the site's stable landing or documentation page, not to a deep link that may have moved.
+- Never invent a URL, never guess at one, and never link to a specific video, blog post or tutorial you are not certain still exists. If you cannot give a URL you are confident in, give the resource's exact title with an empty url and let the user search for it.
 - Return valid JSON only. No markdown, no preamble, no explanation.`;
 
 const SHAPE = `{
@@ -70,7 +85,7 @@ const SHAPE = `{
       "why": "why this matters for this target role",
       "skills": ["skill this closes"],
       "actions": ["concrete step"],
-      "resources": ["specific book, course or tool"],
+      "resources": [{ "title": "exact name of the book, course, docs or tool", "url": "https://... or empty string if unsure" }],
       "success_criteria": "how they know this is done",
       "estimate": "~2 weeks"
     }
@@ -99,6 +114,48 @@ const strArray = (v: unknown, max: number): string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && !!x.trim()).map((x) => x.trim()).slice(0, max) : [];
 
 /**
+ * Keeps a URL only if it is one we are willing to hand a user.
+ *
+ * Requires an absolute http(s) address with a real dotted host. Anything else —
+ * a bare phrase, a relative path, `example.com` placeholders, a javascript:
+ * URI — is discarded and the resource degrades to a plain title.
+ */
+function safeUrl(raw: unknown): string {
+  if (typeof raw !== "string" || !raw.trim()) return "";
+  const candidate = raw.trim();
+  try {
+    const u = new URL(candidate);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+    if (!u.hostname.includes(".")) return "";
+    // Models reach for these when they have nothing real.
+    if (/^(example|test|localhost|yoursite|website)\./i.test(u.hostname)) return "";
+    return u.toString();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Accepts both the current `{title, url}` shape and the bare strings earlier
+ * roadmaps stored, so a saved roadmap keeps working after this change.
+ */
+function resourceArray(v: unknown, max: number): RoadmapResource[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .map((r: any): RoadmapResource | null => {
+      if (typeof r === "string") {
+        const title = r.trim();
+        return title ? { title, url: "" } : null;
+      }
+      const title = str(r?.title);
+      if (!title) return null;
+      return { title, url: safeUrl(r?.url) };
+    })
+    .filter(Boolean)
+    .slice(0, max) as RoadmapResource[];
+}
+
+/**
  * Rejects anything that would render as a broken card.
  *
  * A malformed milestone does not throw when drawn — it renders as an empty
@@ -119,7 +176,7 @@ export function validateRoadmap(raw: any, targetRole: string): Roadmap | null {
         why: str(m?.why),
         skills: strArray(m?.skills, 8),
         actions: strArray(m?.actions, 10),
-        resources: strArray(m?.resources, 8),
+        resources: resourceArray(m?.resources, 8),
         successCriteria: str(m?.success_criteria),
         estimate: str(m?.estimate, "—"),
       };
