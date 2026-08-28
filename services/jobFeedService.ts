@@ -35,6 +35,11 @@ export interface FeedJob {
   platformName: string;
 }
 
+/** Extracts skills from free text using the shared vocabulary. */
+export function skillsFromText(text: string): string[] {
+  return extractSkills(text);
+}
+
 export interface FeedResult {
   jobs: FeedJob[];
   /** Sources that answered, for the UI to report honestly. */
@@ -44,6 +49,9 @@ export interface FeedResult {
   fetchedAt: string;
 }
 
+import { apiFetch } from "./authApiService";
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "";
 const REMOTIVE = "https://remotive.com/api/remote-jobs";
 const ARBEITNOW = "https://www.arbeitnow.com/api/job-board-api";
 const TIMEOUT_MS = 15_000;
@@ -207,11 +215,55 @@ export function dedupe(jobs: FeedJob[]): FeedJob[] {
   return [...best.values()];
 }
 
-/** Fetches every source in parallel and merges them. */
-export async function fetchLiveJobs(): Promise<FeedResult> {
-  const [remotive, arbeitnow] = await Promise.all([
+/**
+ * Careerjet, through our own backend.
+ *
+ * Its results arrive with no parsed skills — it returns an excerpt rather than
+ * tags — so skills are extracted here with the same vocabulary used for the
+ * other boards. Without that, every Bangladeshi listing would score 0% and
+ * look like a worse match than a remote job the user is less suited to.
+ */
+async function fetchCareerjet(opts: { keywords?: string; location?: string }): Promise<FeedJob[] | null> {
+  if (!API_URL) return null;
+  try {
+    const params = new URLSearchParams();
+    if (opts.keywords) params.set("keywords", opts.keywords);
+    if (opts.location) params.set("location", opts.location);
+
+    const res = await apiFetch<{ jobs: FeedJob[]; available: boolean; reason?: string }>(
+      `/api/jobs/search?${params}`,
+      { timeoutMs: TIMEOUT_MS },
+      true,
+    );
+
+    if (!res?.available) {
+      if (res?.reason && res.reason !== "not_configured") {
+        console.warn(`[jobs] Careerjet unavailable: ${res.reason}`);
+      }
+      return null;
+    }
+
+    return (res.jobs ?? []).map((j) => ({
+      ...j,
+      requiredSkills: extractSkills(`${j.title} ${j.description}`),
+    }));
+  } catch (e: any) {
+    console.warn("[jobs] Careerjet request failed:", e?.message ?? e);
+    return null;
+  }
+}
+
+/**
+ * Fetches every source in parallel and merges them.
+ *
+ * `keywords` and `location` steer Careerjet only — the other two boards have no
+ * server-side search worth using here, and are filtered client-side by role.
+ */
+export async function fetchLiveJobs(opts: { keywords?: string; location?: string } = {}): Promise<FeedResult> {
+  const [remotive, arbeitnow, careerjet] = await Promise.all([
     getJson(`${REMOTIVE}?limit=200`),
     getJson(ARBEITNOW),
+    fetchCareerjet(opts),
   ]);
 
   const sources: string[] = [];
@@ -227,6 +279,13 @@ export async function fetchLiveJobs(): Promise<FeedResult> {
     sources.push("Arbeitnow");
     jobs.push(...arbeitnow.data.map(mapArbeitnow).filter(Boolean as any as (j: FeedJob | null) => j is FeedJob));
   } else failed.push("Arbeitnow");
+
+  // Null means unavailable or unconfigured, which is not a failure worth
+  // reporting to the user — an empty array is a real answer.
+  if (careerjet !== null) {
+    if (careerjet.length > 0) sources.push("Careerjet");
+    jobs.push(...careerjet);
+  }
 
   return { jobs: dedupe(jobs), sources, failed, fetchedAt: new Date().toISOString() };
 }

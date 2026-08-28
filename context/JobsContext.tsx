@@ -143,7 +143,12 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
     setError(null);
     try {
-      const result = await fetchLiveJobs();
+      const result = await fetchLiveJobs({
+        keywords: targetRole || undefined,
+        // Careerjet needs a location to search a country; without one it
+        // searches the locale's default, which is not necessarily Bangladesh.
+        location: "Bangladesh",
+      });
       setRawJobs(result.jobs);
       setJobSources(result.sources);
       setLastUpdated(result.fetchedAt);
@@ -157,7 +162,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [targetRole]);
 
   // Fetched on mount so what is on screen reflects what is live now.
   useEffect(() => { void refreshJobs(); }, [refreshJobs]);

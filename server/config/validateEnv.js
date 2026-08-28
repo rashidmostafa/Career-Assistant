@@ -58,6 +58,14 @@ function validateEnv({ strict = process.env.NODE_ENV === "production" } = {}) {
     warnings.push("HAWK_URL is set but HAWK_SECRET is not — the model host is reachable without authentication.");
   }
 
+  // ── Careerjet ──
+  // Optional: without it the feed carries remote/international listings only,
+  // and Bangladeshi roles remain link-outs. That is a real product limitation
+  // rather than a fault, so it is a warning and never blocks startup.
+  if (!process.env.CAREERJET_API_KEY) {
+    warnings.push("CAREERJET_API_KEY is not set — no Bangladesh listings in the job feed; local boards stay as link-outs.");
+  }
+
   // ── AI ──
   if (!process.env.AI_API_KEY) {
     warnings.push("AI_API_KEY is not set — /api/ai/chat returns data:null and CV/roadmap generation falls back to heuristics.");

@@ -160,3 +160,21 @@ services:
       # grace period. 6 hours.
       - key: DELETION_SWEEP_INTERVAL_MS
         value: "21600000"
+
+      # ── Careerjet (Bangladesh job listings) ──────────────────────────────
+      # The only identified route to genuine local listings: Careerjet
+      # aggregates bdjobs and the other Bangladeshi boards, which publish no
+      # API or RSS of their own. Get a key from a Publisher account at
+      # careerjet.com/partners/api — note the older public.api.careerjet.net
+      # endpoint was retired and a free affiliate ID is no longer sufficient.
+      #
+      # Left unset, /api/jobs/search returns an empty list and the feed carries
+      # remote and international roles only.
+      - key: CAREERJET_API_KEY
+        sync: false
+
+      # locale_code sent with every query. An unsupported value returns HTTP 400
+      # rather than an empty result, and the supported list is behind Careerjet's
+      # partner login — so verify this against their docs once you have access.
+      - key: CAREERJET_LOCALE
+        value: en_BD

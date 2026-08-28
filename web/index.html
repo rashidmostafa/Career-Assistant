@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CareerAI — CV analysis, career roadmaps and job matching</title>
+<meta name="description" content="CareerAI reads your CV, scores it against applicant tracking systems, builds a roadmap to your target role, and matches you to live job openings.">
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#12151d; --line:#232936; --fg:#e8ecf3;
+    --muted:#98a2b3; --accent:#4f8cff; --accent-2:#22c55e;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#ffffff; --panel:#f7f9fc; --line:#e3e8ef; --fg:#101828; --muted:#5a6478; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+       background:var(--bg);color:var(--fg);line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:920px;margin:0 auto;padding:0 24px}
+  header{padding:72px 0 48px;text-align:center}
+  .logo{font-size:15px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+  h1{font-size:clamp(30px,5vw,46px);line-height:1.15;margin:18px 0 14px;letter-spacing:-.02em}
+  .sub{font-size:18px;color:var(--muted);max-width:620px;margin:0 auto}
+  section{padding:40px 0;border-top:1px solid var(--line)}
+  h2{font-size:20px;margin:0 0 20px;letter-spacing:-.01em}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px}
+  .card h3{margin:0 0 8px;font-size:15px}
+  .card p{margin:0;color:var(--muted);font-size:14.5px}
+  .step{display:flex;gap:14px;padding:14px 0;border-bottom:1px solid var(--line)}
+  .step:last-child{border-bottom:0}
+  .num{flex:0 0 28px;height:28px;border-radius:50%;border:1.5px solid var(--accent);
+       color:var(--accent);display:grid;place-items:center;font-size:13px;font-weight:700}
+  .step div p{margin:4px 0 0;color:var(--muted);font-size:14.5px}
+  .step div strong{font-size:15px}
+  .tag{display:inline-block;background:var(--accent);color:#fff;font-size:12px;font-weight:700;
+       padding:4px 10px;border-radius:99px;margin-bottom:10px}
+  footer{padding:36px 0 64px;color:var(--muted);font-size:14px;border-top:1px solid var(--line)}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo">CareerAI</div>
+    <h1>Know where your CV stands, and what to do about it.</h1>
+    <p class="sub">
+      CareerAI reads your CV, scores it the way applicant tracking systems do,
+      builds a plan to close the gap to your target role, and matches you against
+      live job openings.
+    </p>
+  </header>
+
+  <section>
+    <h2>What it does</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>CV analysis &amp; ATS scoring</h3>
+        <p>Upload a PDF or Word CV. It is scored across parseability, keyword match,
+           evidence, completeness and clarity — judged against the format you actually
+           wrote it in, whether Harvard, MIT or corporate.</p>
+      </div>
+      <div class="card">
+        <h3>Honest CV rewriting</h3>
+        <p>An optimised version written to score better using only what your CV already
+           evidences. Nothing is invented — every claim has to survive an interview.</p>
+      </div>
+      <div class="card">
+        <h3>Career roadmap</h3>
+        <p>A milestone plan built from the gap between your CV and your target role,
+           with honest effort estimates that vary by how deep each gap really is.</p>
+      </div>
+      <div class="card">
+        <h3>Job matching</h3>
+        <p>Live openings for your target role, each scored by how much of what the role
+           asks for your CV actually shows.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <span class="tag">Where job listings appear</span>
+    <h2>The job feed</h2>
+    <div class="step">
+      <div class="num">1</div>
+      <div>
+        <strong>Live listings only</strong>
+        <p>Openings are fetched at the moment the user opens the tab and are never cached
+           between sessions, so a vacancy that has been filled or withdrawn simply stops
+           appearing. No listing is ever generated or padded.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">2</div>
+      <div>
+        <strong>Filtered to the user's target role</strong>
+        <p>Only openings relevant to the role the user is actually aiming at are shown,
+           rather than an undifferentiated feed.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">3</div>
+      <div>
+        <strong>Deduplicated across sources</strong>
+        <p>The same role syndicated to several boards is shown once, keeping the fullest
+           version of the posting.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">4</div>
+      <div>
+        <strong>Every listing links to the original posting</strong>
+        <p>"Apply" opens the source site's own page for that vacancy. CareerAI does not
+           host applications or intercept them.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">5</div>
+      <div>
+        <strong>A cover letter for the specific role</strong>
+        <p>Written from the posting and the user's real CV, downloadable as PDF or Word,
+           and grounded only in experience they actually have.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Coverage</h2>
+    <p style="color:var(--muted);margin:0">
+      CareerAI currently carries remote and international openings, and is adding
+      Bangladeshi listings so that candidates in Bangladesh — the app's primary
+      audience — can find local roles alongside remote ones rather than being sent
+      elsewhere to look.
+    </p>
+  </section>
+
+  <section>
+    <h2>Platform</h2>
+    <p style="color:var(--muted);margin:0">
+      Mobile application for Android and iOS, built with React Native, backed by a
+      Node.js and MongoDB service. Accounts are protected with two-factor
+      authentication and biometric sign-in, and users can export or delete all of
+      their data.
+    </p>
+  </section>
+
+  <footer>
+    <div class="wrap" style="padding:0">
+      CareerAI — career tooling for job seekers.
+      <br>Contact: <a href="mailto:rashidmostafa004@gmail.com">rashidmostafa004@gmail.com</a>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

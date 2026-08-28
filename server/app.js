@@ -39,6 +39,8 @@ require("dotenv").config();
  *   PUT    /api/data/:namespace       (authenticated)
  *   DELETE /api/data/:namespace       (authenticated)
  *   POST   /api/cv/extract            (authenticated)  PDF/DOCX -> text
+ *   GET    /api/jobs/search           (authenticated)  Careerjet proxy
+ *   GET    /api/jobs/status           (authenticated)
  *   GET    /health
  */
 const express    = require("express");
@@ -55,6 +57,7 @@ const userRoutes = require("./routes/user");
 const aiRoutes   = require("./routes/ai");
 const dataRoutes = require("./routes/data");
 const cvRoutes   = require("./routes/cv");
+const jobRoutes  = require("./routes/jobs");
 const { startDeletionWorker } = require("./services/deletionWorker");
 
 const app  = express();
@@ -163,6 +166,7 @@ app.use("/api/user", userRoutes);
 app.use("/api/ai",   aiRoutes);
 app.use("/api/data", dataRoutes);
 app.use("/api/cv",   cvRoutes);
+app.use("/api/jobs", jobRoutes);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ message: "Not found." }));
