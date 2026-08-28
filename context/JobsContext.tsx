@@ -106,7 +106,11 @@ function roleTerms(targetRole: string): string[] {
  * matching returns the whole feed and the filter stops meaning anything.
  * A term also matches its own stem, so "engineering" satisfies "engineer".
  */
-export function isRelevantToRole(job: Pick<FeedJob, "title" | "category">, targetRole: string): boolean {
+export function isRelevantToRole(
+  job: Pick<FeedJob, "title" | "category">,
+  targetRole: string,
+  opts: { relaxed?: boolean } = {},
+): boolean {
   const terms = roleTerms(targetRole);
   if (terms.length === 0) return true;   // no role set: show everything
 
@@ -115,6 +119,10 @@ export function isRelevantToRole(job: Pick<FeedJob, "title" | "category">, targe
   // The discriminating words — "software", "backend", "data" — not the ones
   // every job title contains.
   const distinctive = terms.filter((t) => !GENERIC_ROLE_WORDS.has(t));
+
+  // Relaxed matching accepts any term, generic ones included, which is the
+  // "same broad discipline" test. Only used when strict matching found nothing.
+  if (opts.relaxed) return terms.some((t) => haystack.includes(t));
 
   // A target made only of generic words ("Engineer", "Manager") has nothing to
   // discriminate on, so fall back to matching those rather than showing nothing.
@@ -194,9 +202,20 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const jobs = useMemo(() => {
     const level = mapUserExperienceToJobLevel(user?.experienceLevel);
 
-    return rawJobs
-      // Requirement 1: only roles the user is actually aiming at.
-      .filter((j) => isRelevantToRole(j, targetRole))
+    // Requirement 1: only roles the user is actually aiming at.
+    //
+    // Strict matching can legitimately empty the list: Careerjet's own search
+    // is loose, so a "Backend Engineer" query returned only frontend, QA and AI
+    // roles, all correctly rejected — leaving the user with nothing and no idea
+    // why. When that happens the discipline match is used instead, so they see
+    // adjacent software roles rather than an empty screen. Showing nothing when
+    // relevant-ish work exists is the worse failure.
+    const strict = rawJobs.filter((j) => isRelevantToRole(j, targetRole));
+    const relaxed = strict.length > 0
+      ? strict
+      : rawJobs.filter((j) => isRelevantToRole(j, targetRole, { relaxed: true }));
+
+    return relaxed
       .filter((j) => enabledPlatformIds.includes(j.platformId))
       .map((j): JobListing => {
         const match = computeJobMatch(j.requiredSkills, cvSkills);

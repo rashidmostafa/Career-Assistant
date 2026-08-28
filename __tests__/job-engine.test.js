@@ -48,6 +48,15 @@ describe("rule 1 — only jobs for the target role", () => {
     expect(isRelevantToRole(job("Structural Engineer"), "Engineer")).toBe(true);
   });
 
+  it("relaxed mode accepts the broader discipline", () => {
+    // Used only when strict matching empties the list, so the user sees
+    // adjacent software roles rather than a blank screen.
+    expect(isRelevantToRole(job("Software Engineer (Frontend)"), "Backend Engineer", { relaxed: true })).toBe(true);
+    expect(isRelevantToRole(job("Software QA Engineer"), "Backend Engineer", { relaxed: true })).toBe(true);
+    // Still not a free-for-all: an unrelated discipline stays out.
+    expect(isRelevantToRole(job("Registered Nurse"), "Backend Engineer", { relaxed: true })).toBe(false);
+  });
+
   it("shows everything when no target role is set", () => {
     expect(isRelevantToRole(job("Anything At All"), "")).toBe(true);
   });
