@@ -18,6 +18,28 @@ router.get("/status", authenticate, (_req, res) => {
 });
 
 /**
+ * GET /api/jobs/outbound-ip
+ *
+ * Reports the address this server actually leaves from.
+ *
+ * Careerjet authorises API access per IP and rejects everything else with
+ * "Unauthorized access from IP x.x.x.x". Render lists several static outbound
+ * addresses for a service and does not say which one a given request will use,
+ * so this asks an echo service and reports the answer — turning a guess into a
+ * fact before anything is whitelisted. Useful for any future provider with the
+ * same requirement.
+ */
+router.get("/outbound-ip", authenticate, async (_req, res) => {
+  try {
+    const r = await fetch("https://api.ipify.org?format=json", { signal: AbortSignal.timeout(10000) });
+    const { ip } = await r.json();
+    res.json({ outboundIp: ip, note: "Whitelist this address in the Careerjet publisher API settings." });
+  } catch (e) {
+    res.status(502).json({ message: "Couldn't determine the outbound IP.", detail: e.message });
+  }
+});
+
+/**
  * GET /api/jobs/search?keywords=&location=
  *
  * Returns an empty list rather than an error when Careerjet is unavailable:
