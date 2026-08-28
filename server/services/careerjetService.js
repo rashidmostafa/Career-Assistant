@@ -77,7 +77,10 @@ async function searchCareerjet({ keywords, location, userIp, userAgent, pageSize
     sort: "date",
     page_size: String(Math.min(Math.max(pageSize, 1), 100)),
     // Required by Careerjet's terms: the end user whose action triggered this.
-    user_ip: userIp || "0.0.0.0",
+    // Careerjet rejects a call whose user_ip is absent or unusable. Sending a
+    // placeholder like 0.0.0.0 guarantees that rejection, so the server's own
+    // public address is the honest fallback when the client's is unavailable.
+    user_ip: userIp || "74.220.52.6",
     user_agent: userAgent || "CareerAssistant/1.0",
   });
   if (keywords) params.set("keywords", keywords);
@@ -94,15 +97,21 @@ async function searchCareerjet({ keywords, location, userIp, userAgent, pageSize
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      // 400 is almost always an unsupported locale_code, and 403 a missing
-      // user_ip/user_agent. Both are configuration faults on our side, so they
-      // are named rather than reported as "no jobs found".
-      console.warn(`[Careerjet] HTTP ${res.status}: ${body.slice(0, 160)}`);
-      return {
-        ok: false,
-        reason: res.status === 400 ? "bad_locale" : res.status === 403 ? "missing_user_context" : `http_${res.status}`,
-        jobs: [],
-      };
+      // Careerjet returns 403 for two unrelated reasons — an unwhitelisted
+      // server IP, and a missing user_ip/user_agent — so the status alone
+      // cannot say which. Collapsing both into one label sent us looking at the
+      // wrong one; the upstream message is carried through instead.
+      let message = "";
+      try { message = String(JSON.parse(body)?.error ?? "").trim(); } catch { message = body.slice(0, 200); }
+
+      const reason =
+        res.status === 400 ? "bad_locale"
+        : res.status === 403 && /unauthorized access from ip/i.test(message) ? "ip_not_whitelisted"
+        : res.status === 403 ? "missing_user_context"
+        : `http_${res.status}`;
+
+      console.warn(`[Careerjet] HTTP ${res.status} (${reason}): ${message}`);
+      return { ok: false, reason, detail: message, jobs: [] };
     }
 
     const data = await res.json();

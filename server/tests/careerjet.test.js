@@ -55,8 +55,22 @@ describe("proxy behaviour", () => {
   });
 
   it("forwards the real user's IP and agent, as the terms require", () => {
-    expect(routeSrc).toMatch(/userIp: req\.ip/);
+    expect(routeSrc).toMatch(/req\.ip/);
     expect(routeSrc).toMatch(/req\.headers\["user-agent"\]/);
+  });
+
+  it("refuses to send a private or malformed address as the user IP", () => {
+    // Behind a proxy req.ip can be an internal address, which Careerjet rejects
+    // — and a placeholder like 0.0.0.0 guarantees the same rejection.
+    expect(routeSrc).toMatch(/isPublicIp/);
+    expect(routeSrc).toMatch(/192\\.168\\./);
+  });
+
+  it("distinguishes an unwhitelisted IP from a missing user context", () => {
+    // Careerjet returns 403 for both; collapsing them hides which is wrong.
+    const svc = fs.readFileSync(require.resolve("../services/careerjetService.js"), "utf8");
+    expect(svc).toMatch(/ip_not_whitelisted/);
+    expect(svc).toMatch(/unauthorized access from ip/i);
   });
 
   it("degrades to an empty list rather than failing the whole feed", () => {

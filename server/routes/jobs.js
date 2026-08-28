@@ -50,11 +50,23 @@ router.get("/search", authenticate, async (req, res, next) => {
   try {
     const { keywords, location } = req.query;
 
+    // Careerjet wants the end user's address. Behind Render's proxy req.ip
+    // comes from X-Forwarded-For, but if that is missing or private the value
+    // is useless to them and the call is rejected — so it is checked rather
+    // than sent blindly.
+    const isPublicIp = (ip) =>
+      typeof ip === "string" &&
+      /^\d{1,3}(\.\d{1,3}){3}$/.test(ip) &&
+      !/^(10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip);
+
+    const rawIp = (req.ip || "").replace(/^::ffff:/, "");
+    const userIp = isPublicIp(rawIp) ? rawIp : null;
+
     const result = await searchCareerjet({
       keywords: typeof keywords === "string" ? keywords.slice(0, 200) : "",
       location: typeof location === "string" ? location.slice(0, 100) : "",
       // Forwarded per Careerjet's terms — the user whose action triggered this.
-      userIp: req.ip,
+      userIp,
       userAgent: req.headers["user-agent"],
       pageSize: 50,
     });
@@ -65,6 +77,12 @@ router.get("/search", authenticate, async (req, res, next) => {
       // Named so a misconfiguration is diagnosable from the client rather than
       // looking like "no jobs in Bangladesh".
       reason: result.ok ? undefined : result.reason,
+      // Careerjet's own words, so a misconfiguration is diagnosable without a
+      // redeploy to add logging.
+      detail: result.ok ? undefined : result.detail,
+      // Echoed while diagnosing: a rejected call is usually about which address
+      // reached Careerjet, and guessing at that is what cost us a cycle.
+      sentUserIp: result.ok ? undefined : (userIp ?? `rejected:${rawIp || "none"}`),
       locations: result.locations,
     });
   } catch (e) {
