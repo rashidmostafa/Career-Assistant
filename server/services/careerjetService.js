@@ -29,6 +29,7 @@ const LOCALE = process.env.CAREERJET_LOCALE ?? "en_BD";
  */
 const REFERER = process.env.CAREERJET_REFERER ?? "https://strong-bonbon-4e6573.netlify.app";
 const TIMEOUT_MS = Number(process.env.CAREERJET_TIMEOUT_MS ?? 15000);
+const FRAGMENT_SIZE = Number(process.env.CAREERJET_FRAGMENT_SIZE ?? 1500);
 
 const isConfigured = () => API_KEY.length > 0;
 
@@ -83,6 +84,13 @@ async function searchCareerjet({ keywords, location, userIp, userAgent, pageSize
   const params = new URLSearchParams({
     locale_code: LOCALE,
     sort: "date",
+    // Careerjet returns an excerpt, not the posting, and defaults it to 120
+    // characters. That is far too little to identify the skills a role asks
+    // for: measured excerpts averaged 242 characters and most yielded no
+    // skills at all, so every Bangladeshi listing would have shown "no match
+    // score" while Remotive jobs — which carry full descriptions — scored
+    // normally. Asking for more text is what makes the two comparable.
+    fragment_size: String(FRAGMENT_SIZE),
     page_size: String(Math.min(Math.max(pageSize, 1), 100)),
     // Required by Careerjet's terms: the end user whose action triggered this.
     // Careerjet rejects a call whose user_ip is absent or unusable. Sending a

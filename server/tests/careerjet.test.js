@@ -32,6 +32,15 @@ describe("v4 contract", () => {
     expect(src).toMatch(/process\.env\.CAREERJET_LOCALE/);
   });
 
+  it("asks for a usable excerpt, not Careerjet's 120-character default", () => {
+    // At the default, most listings yield no parseable skills and every
+    // Bangladeshi job shows no match score beside fully-scored remote ones.
+    expect(src).toMatch(/fragment_size/);
+    const m = src.match(/CAREERJET_FRAGMENT_SIZE \?\? (\d+)/);
+    expect(m).not.toBeNull();
+    expect(Number(m[1])).toBeGreaterThanOrEqual(1000);
+  });
+
   it("respects the documented page_size ceiling of 100", () => {
     expect(src).toMatch(/Math\.min\(Math\.max\(pageSize, 1\), 100\)/);
   });
