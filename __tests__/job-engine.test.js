@@ -118,8 +118,8 @@ describe("feed sources are separate from link-out sites", () => {
     ...read("server/services/careerjetService.js").matchAll(/platformId:\s*"([^"]+)"/g),
   ].map((m) => m[1]);
 
-  it("emits at least one id per live board", () => {
-    expect(new Set(emitted)).toEqual(new Set(["remotive", "arbeitnow", "careerjet"]));
+  it("emits only ids the feed knows about", () => {
+    expect(new Set(emitted)).toEqual(new Set(["careerjet"]));
   });
 
   it("passes every emitted id through the default filter", () => {

@@ -43,7 +43,7 @@ const clean = (s) =>
 
 /**
  * Maps a Careerjet result into the shape the app's feed already uses, so it
- * merges with Remotive and Arbeitnow and passes through the same dedupe.
+ * passes through the same dedupe as any other source.
  */
 function mapJob(j) {
   const title = clean(j?.title);
@@ -92,7 +92,7 @@ async function searchCareerjet({ keywords, location, userIp, userAgent, pageSize
     // The consequence is real and unavoidable from our side: with ~242
     // characters of text, only about a quarter of Careerjet listings yield
     // enough to identify required skills, against roughly three quarters of
-    // Remotive's, which carry full descriptions. Listings we cannot score show
+    // a full description. Listings we cannot score show
     // no match rather than 0% — see JobListing.skillMatch.applicable.
     fragment_size: String(FRAGMENT_SIZE),
     page_size: String(Math.min(Math.max(pageSize, 1), 100)),

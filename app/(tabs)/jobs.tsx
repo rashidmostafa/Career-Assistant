@@ -9,6 +9,7 @@ import {
   Linking,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -36,6 +37,7 @@ export default function JobsScreen() {
   const { user } = useAuth();
   const {
     jobs,
+    isLoading,
     getMatch,
     generateCoverLetter,
     lastUpdated,
@@ -171,7 +173,7 @@ export default function JobsScreen() {
       <View style={styles.modalOverlay}>
         <View style={[styles.modalSheet, { backgroundColor: colors.background, paddingBottom: bottomPad + 24 }]}>
           <View style={styles.modalHeader}>
-            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Filters & Job Sources</Text>
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>{FEED_SOURCES.length > 1 ? "Filters & Job Sources" : "Filters"}</Text>
             <TouchableOpacity onPress={() => setFiltersOpen(false)}>
               <X size={22} color={colors.foreground} />
             </TouchableOpacity>
@@ -181,21 +183,24 @@ export default function JobsScreen() {
             {renderFilterChipRow("Job Type", JOB_TYPES, filters.jobType, (v) => setFilters({ jobType: v }))}
             {renderFilterChipRow("Experience Level", JOB_EXPERIENCE_LEVELS, filters.experienceLevel, (v) => setFilters({ experienceLevel: v }))}
 
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <Text style={[styles.filterLabel, { color: colors.foreground, marginBottom: 0 }]}>Job Sources</Text>
-              <View style={{ flexDirection: "row", gap: 12 }}>
-                <TouchableOpacity onPress={() => setAllPlatformsEnabled(true)}>
-                  <Text style={[styles.linkAction, { color: jobsColor }]}>All On</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setAllPlatformsEnabled(false)}>
-                  <Text style={[styles.linkAction, { color: colors.mutedForeground }]}>All Off</Text>
-                </TouchableOpacity>
+            {/* The whole Job Sources section only earns its place when there is
+                a choice to make. With a single source these controls can only
+                empty the feed, so they are hidden rather than shown broken. */}
+            {FEED_SOURCES.length > 1 && (
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <Text style={[styles.filterLabel, { color: colors.foreground, marginBottom: 0 }]}>Job Sources</Text>
+                <View style={{ flexDirection: "row", gap: 12 }}>
+                  <TouchableOpacity onPress={() => setAllPlatformsEnabled(true)}>
+                    <Text style={[styles.linkAction, { color: jobsColor }]}>All On</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setAllPlatformsEnabled(false)}>
+                    <Text style={[styles.linkAction, { color: colors.mutedForeground }]}>All Off</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
+            )}
 
-            {/* Empty categories are skipped: with only three feeds, a bare
-                heading over no rows reads as a section that failed to load. */}
-            {PLATFORM_CATEGORIES.filter((cat) => FEED_SOURCES.some((p) => p.category === cat)).map((cat) => (
+            {FEED_SOURCES.length > 1 && PLATFORM_CATEGORIES.filter((cat) => FEED_SOURCES.some((p) => p.category === cat)).map((cat) => (
               <View key={cat} style={{ marginBottom: 14 }}>
                 <Text style={[styles.platformCategoryLabel, { color: colors.mutedForeground }]}>{PLATFORM_CATEGORY_LABELS[cat]}</Text>
                 {FEED_SOURCES.filter((p) => p.category === cat).map((platform) => {
@@ -360,35 +365,15 @@ export default function JobsScreen() {
     );
   }
 
-  return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.headerWrap, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}> 
-        <LinearGradient
-          colors={[
-            (jobsColor || "#2563eb") + "1f",
-            colors.background,
-            colors.card,
-          ]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.headerGradient}
-        />
-        <View style={[styles.headerBlob, styles.headerBlobOne, { backgroundColor: (jobsColor || "#2563eb") + "24" }]} />
-        <View style={[styles.headerBlob, styles.headerBlobTwo, { backgroundColor: colors.success + "1c" }]} />
-        <View style={styles.headerTop}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.headerTitle, { color: colors.foreground }]}>Job Matches</Text>
-            <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>
-              {user?.targetRole ? `Tailored for ${user.targetRole} · ${enabledPlatformIds.length} sources` : "Set a target role for better matches"}
-            </Text>
-          </View>
-          <View style={[styles.updateBadge, { backgroundColor: colors.secondary }]}>
-            <RefreshCw size={11} color={colors.mutedForeground} />
-            <Text style={[styles.updateText, { color: colors.mutedForeground }]}>{lastUpdated}</Text>
-          </View>
-        </View>
-      </View>
-
+  /**
+   * Everything above the list that is worth reading once, not kept on screen.
+   *
+   * These sat in fixed chrome, which cost roughly half the height of a phone
+   * screen before the first job card appeared. Scrolling them with the list
+   * keeps them reachable while giving the listings the room.
+   */
+  const ListHeader = (
+    <View style={{ marginBottom: 4 }}>
       {!hasCVSkills && (
         <TouchableOpacity
           style={[styles.cvPrompt, { backgroundColor: colors.accent, borderColor: colors.primary + "30" }]}
@@ -402,33 +387,35 @@ export default function JobsScreen() {
         </TouchableOpacity>
       )}
 
+      {/* Negative margin cancels the list's own padding so the chips line up
+          with the cards below rather than sitting doubly indented. */}
+      <View style={{ marginHorizontal: -20 }}>
+        <RoleSwitcher accent={jobsColor} />
+      </View>
+
       {/* Where these listings came from. Sample data is labelled as such rather
           than presented as live vacancies. */}
-      <RoleSwitcher accent={jobsColor} />
-
-      <View style={styles.sourceRow}>
-        <Text style={[styles.sourceText, { color: usingFallback ? colors.warning : colors.mutedForeground }]}>
-          {usingFallback
-            ? "Offline — showing sample roles, not live vacancies"
-            : jobSources.length
-              ? `Live from ${jobSources.join(" · ")}`
-              : "Loading live listings…"}
-        </Text>
-        <TouchableOpacity onPress={refreshJobs} hitSlop={8} accessibilityRole="button" accessibilityLabel="Refresh job listings">
-          <RefreshCw size={15} color={jobsColor} />
-        </TouchableOpacity>
-      </View>
+      <Text style={[styles.sourceText, { color: usingFallback ? colors.warning : colors.mutedForeground }]}>
+        {usingFallback
+          ? "Couldn't reach Careerjet — pull down to retry"
+          : jobSources.length
+            ? `Live from ${jobSources.join(" · ")}`
+            : "Loading live listings…"}
+      </Text>
 
       {/* The live feed covers remote and European roles. Bangladeshi boards have
           no public API, so they are reached directly instead of being faked. */}
       <View style={styles.siteStrip}>
-        <Text style={[styles.siteStripLabel, { color: colors.mutedForeground }]}>BROWSE JOB SITES</Text>
-        <Text style={[styles.siteStripHint, { color: colors.mutedForeground }]}>
-          {user?.targetRole
-            ? `Opens each site's results for "${user.targetRole}".`
-            : "Set a target role in your profile to search these directly."}
+        <Text style={[styles.siteStripLabel, { color: colors.mutedForeground }]}>
+          BROWSE JOB SITES
+          {user?.targetRole ? <Text style={styles.siteStripHint}>{`  ·  opens results for "${user.targetRole}"`}</Text> : null}
         </Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.siteChips}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ marginHorizontal: -24 }}
+          contentContainerStyle={[styles.siteChips, { paddingHorizontal: 24 }]}
+        >
           {JOB_PLATFORMS.map((platform) => (
             <TouchableOpacity
               key={platform.id}
@@ -444,36 +431,94 @@ export default function JobsScreen() {
           ))}
         </ScrollView>
       </View>
+    </View>
+  );
 
-      <View style={styles.searchRow}>
-        <View style={[styles.searchWrap, { backgroundColor: colors.card, borderColor: colors.border, flex: 1 }]}>
-          <Search size={18} color={colors.mutedForeground} />
-          <TextInput
-            style={[styles.searchInput, { color: colors.foreground }]}
-            placeholder="Search jobs, companies, platforms…"
-            placeholderTextColor={colors.mutedForeground}
-            value={search}
-            onChangeText={setSearch}
-          />
+  return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* Fixed chrome is limited to identity and search — the two things worth
+          keeping within reach while scrolling a long list. */}
+      <View style={[styles.headerWrap, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
+        <LinearGradient
+          colors={[
+            (jobsColor || "#2563eb") + "1f",
+            colors.background,
+            colors.card,
+          ]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.headerGradient}
+        />
+        <View style={[styles.headerBlob, styles.headerBlobOne, { backgroundColor: (jobsColor || "#2563eb") + "24" }]} />
+        <View style={[styles.headerBlob, styles.headerBlobTwo, { backgroundColor: colors.success + "1c" }]} />
+        <View style={styles.headerTop}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.headerTitle, { color: colors.foreground }]}>Job Matches</Text>
+            <Text style={[styles.headerSub, { color: colors.mutedForeground }]} numberOfLines={1}>
+              {user?.targetRole ? `Tailored for ${user.targetRole}` : "Set a target role for better matches"}
+            </Text>
+          </View>
+          {/* The freshness badge doubles as the refresh control, so losing the
+              old separate refresh row costs nothing. */}
+          <TouchableOpacity
+            style={[styles.updateBadge, { backgroundColor: colors.secondary }]}
+            onPress={refreshJobs}
+            disabled={isLoading}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Refresh job listings"
+          >
+            {isLoading
+              ? <ActivityIndicator size="small" color={colors.mutedForeground} />
+              : <RefreshCw size={11} color={colors.mutedForeground} />}
+            <Text style={[styles.updateText, { color: colors.mutedForeground }]}>{lastUpdated}</Text>
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity
-          style={[styles.filterBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-          onPress={() => setFiltersOpen(true)}
-        >
-          <SlidersHorizontal size={18} color={colors.foreground} />
-          {activeFilterCount > 0 && (
-            <View style={[styles.filterCountBadge, { backgroundColor: jobsColor }]}>
-              <Text style={styles.filterCountText}>{activeFilterCount}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
+
+        <View style={styles.searchRow}>
+          <View style={[styles.searchWrap, { backgroundColor: colors.card, borderColor: colors.border, flex: 1 }]}>
+            <Search size={18} color={colors.mutedForeground} />
+            <TextInput
+              style={[styles.searchInput, { color: colors.foreground }]}
+              placeholder="Search jobs, companies, skills…"
+              placeholderTextColor={colors.mutedForeground}
+              value={search}
+              onChangeText={setSearch}
+              returnKeyType="search"
+            />
+            {search.length > 0 && (
+              <TouchableOpacity onPress={() => setSearch("")} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
+                <X size={16} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            )}
+          </View>
+          <TouchableOpacity
+            style={[styles.filterBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+            onPress={() => setFiltersOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Filters and job sources"
+          >
+            <SlidersHorizontal size={18} color={colors.foreground} />
+            {activeFilterCount > 0 && (
+              <View style={[styles.filterCountBadge, { backgroundColor: jobsColor }]}>
+                <Text style={styles.filterCountText}>{activeFilterCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.id}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: bottomPad + 100 }}
+        ListHeaderComponent={ListHeader}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        refreshControl={
+          <RefreshControl refreshing={isLoading} onRefresh={refreshJobs} tintColor={jobsColor} colors={[jobsColor]} />
+        }
+        contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 14, paddingBottom: bottomPad + 100 }}
         renderItem={({ item }) => {
           const match = getMatch(item.id);
           const isApplied = appliedJobIds.includes(item.id);
@@ -630,17 +675,17 @@ export default function JobsScreen() {
         ListEmptyComponent={
           <View style={[styles.emptyState, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
-              {enabledPlatformIds.length === 0
-                ? "No job sources enabled"
+              {usingFallback
+                ? "Couldn't reach the job board"
                 : user?.targetRole
                 ? `No jobs found for ${user.targetRole}`
                 : "No jobs found"}
             </Text>
             <Text style={[styles.emptySub, { color: colors.mutedForeground }]}>
-              {enabledPlatformIds.length === 0
-                ? "Turn on at least one job source in Filters to see listings."
+              {usingFallback
+                ? "Careerjet didn't respond. Pull down to try again, or use Browse Job Sites above."
                 : user?.targetRole
-                ? `Try adjusting your filters, enabling more job sources, or updating your target role.`
+                ? "Try adjusting your filters or updating your target role, or use Browse Job Sites above."
                 : "Update your target role in Profile for tailored job matches."}
             </Text>
           </View>
@@ -653,33 +698,32 @@ export default function JobsScreen() {
 
 const styles = StyleSheet.create({
   platformOpenBtn: { padding: 6, marginRight: 4 },
-  sourceRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, marginBottom: 10, gap: 10 },
-  sourceText: { fontFamily: "Inter_500Medium", fontSize: 12.5, flex: 1 },
-  siteStrip: { marginBottom: 16, paddingHorizontal: 20 },
-  siteStripLabel: { fontFamily: "Inter_600SemiBold", fontSize: 12.5, letterSpacing: 0.4, marginBottom: 4 },
-  siteStripHint: { fontFamily: "Inter_400Regular", fontSize: 13, lineHeight: 18, marginBottom: 10 },
+  sourceText: { fontFamily: "Inter_500Medium", fontSize: 12.5, marginBottom: 12 },
+  siteStrip: { marginBottom: 14 },
+  siteStripLabel: { fontFamily: "Inter_600SemiBold", fontSize: 11.5, letterSpacing: 0.4, marginBottom: 8 },
+  siteStripHint: { fontFamily: "Inter_400Regular", fontSize: 11.5, letterSpacing: 0 },
   siteChips: { flexDirection: "row", gap: 8 },
-  siteChip: { flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 13, paddingVertical: 9, borderRadius: 999, borderWidth: 1 },
+  siteChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1 },
   siteChipText: { fontFamily: "Inter_600SemiBold", fontSize: 13.5 },
   container: { flex: 1 },
-  headerWrap: { paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth, position: "relative", overflow: "hidden" },
+  headerWrap: { paddingHorizontal: 24, paddingBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth, position: "relative", overflow: "hidden" },
   headerGradient: { ...StyleSheet.absoluteFillObject },
   headerBlob: { position: "absolute", borderRadius: 999 },
   headerBlobOne: { width: 150, height: 150, right: -36, top: 14 },
   headerBlobTwo: { width: 105, height: 105, left: -20, top: 54 },
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth },
   headerTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  headerTitle: { fontSize: 24, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
-  headerSub: { fontSize: 13, fontFamily: "Inter_500Medium", marginTop: 3 },
-  updateBadge: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" },
+  headerTitle: { fontSize: 21, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
+  headerSub: { fontSize: 12.5, fontFamily: "Inter_500Medium", marginTop: 2 },
+  updateBadge: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, minHeight: 30, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" },
   updateText: { fontSize: 11, fontFamily: "Inter_500Medium" },
   backBtn: { marginRight: 16 },
-  cvPrompt: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 24, marginTop: 16, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 14, borderWidth: 1 },
+  cvPrompt: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 14, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 14, borderWidth: 1 },
   cvPromptText: { flex: 1, fontSize: 13, fontFamily: "Inter_500Medium", lineHeight: 18 },
-  searchRow: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 24, marginVertical: 16 },
-  searchWrap: { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, borderWidth: 1, shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 2 },
-  searchInput: { flex: 1, fontSize: 15, fontFamily: "Inter_500Medium" },
-  filterBtn: { width: 50, height: 50, borderRadius: 16, borderWidth: 1, alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 2 },
+  searchRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 12 },
+  searchWrap: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 11, borderWidth: 1, shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 2 },
+  searchInput: { flex: 1, fontSize: 14.5, fontFamily: "Inter_500Medium", paddingVertical: 0 },
+  filterBtn: { width: 46, height: 46, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 2 },
   filterCountBadge: { position: "absolute", top: -4, right: -4, minWidth: 18, height: 18, borderRadius: 9, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
   filterCountText: { color: "#fff", fontSize: 10, fontFamily: "Inter_700Bold" },
   jobCard: { borderRadius: 20, padding: 20, borderWidth: 1, marginBottom: 16, overflow: "hidden", position: "relative" },

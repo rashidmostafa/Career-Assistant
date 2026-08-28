@@ -1,5 +1,8 @@
 /**
- * Hits the real job APIs. Skipped automatically when offline.
+ * Hits the real feed. Careerjet is the only source and it is reached through
+ * our backend, which requires a signed-in user, so outside the app this returns
+ * nothing and the assertions are skipped. What it still proves when it does run
+ * is that whatever arrives is shaped correctly and free of duplicates.
  */
 const { fetchLiveJobs, dedupe, dedupeKey } = require("../services/jobFeedService");
 
@@ -12,7 +15,7 @@ test("fetches real listings from live sources", async () => {
   console.log("  jobs after dedupe:", r.jobs.length);
 
   if (r.sources.length === 0) {
-    console.log("  (offline — skipping assertions)");
+    console.log("  (no source reachable without an auth token — skipping assertions)");
     return;
   }
 

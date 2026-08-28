@@ -13,14 +13,15 @@ export interface JobPlatform {
  * Boards whose listings are fetched INTO the app.
  *
  * Kept separate from JOB_PLATFORMS, which are sites we can only link out to.
- * Conflating the two broke the feed: it filtered results against the link-out
- * list, which contains neither Remotive nor Arbeitnow, so every listing from
- * those two was silently discarded and only Careerjet's survived.
+ * Conflating the two broke the feed once: it filtered results against the
+ * link-out list, so listings whose source was not on it were all discarded.
+ *
+ * Careerjet is the only entry, and is an aggregator, so one request covers many
+ * underlying boards. See the note at the top of services/jobFeedService.ts for
+ * why Remotive and Arbeitnow were dropped.
  */
 export const FEED_SOURCES: JobPlatform[] = [
   { id: "careerjet", name: "Careerjet", shortName: "Careerjet", icon: "🌐", category: "general", baseUrl: "https://www.careerjet.com.bd" },
-  { id: "remotive", name: "Remotive", shortName: "Remotive", icon: "🌍", category: "international", baseUrl: "https://remotive.com" },
-  { id: "arbeitnow", name: "Arbeitnow", shortName: "Arbeitnow", icon: "💼", category: "international", baseUrl: "https://www.arbeitnow.com" },
 ];
 
 /**

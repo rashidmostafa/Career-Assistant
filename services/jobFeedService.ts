@@ -8,13 +8,20 @@
  * That file is gone and there is no fallback — an empty list is the correct
  * answer when nothing real is available, and the screen says so.
  *
- * Both sources are public, need no key, and send permissive CORS headers, so
- * they work from the browser build and a device alike.
+ * The single source is Careerjet, reached through our own backend because the
+ * API key must not ship in the app. It is an aggregator, so one request covers
+ * many underlying boards, and it indexes Bangladesh.
  *
- * Worth being straight about the coverage: neither source indexes Bangladesh.
- * Bdjobs, Chakri and the other local boards publish no public API, so local
- * roles are reached by linking out to those sites rather than by inventing
- * listings for them.
+ * Remotive and Arbeitnow were fetched here too and have been removed. They were
+ * measured rather than assumed: of 175 Arbeitnow listings, none were in
+ * Bangladesh, 59 were in Germany and roughly as many in London, almost all
+ * on-site and so needing a visa and relocation. Remotive returned 19 jobs, of
+ * which 6 were open worldwide. Between them they supplied 160 of 179 results —
+ * a feed dominated by roles its users could not apply to.
+ *
+ * Bdjobs, Chakri and the other local boards publish no public API, and LinkedIn
+ * restricts job search to its Talent Solutions partners, so those are reached
+ * by linking out rather than by inventing listings for them.
  */
 export interface FeedJob {
   id: string;
@@ -52,38 +59,7 @@ export interface FeedResult {
 import { apiFetch } from "./authApiService";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "";
-const REMOTIVE = "https://remotive.com/api/remote-jobs";
-const ARBEITNOW = "https://www.arbeitnow.com/api/job-board-api";
 const TIMEOUT_MS = 15_000;
-
-/**
- * AbortSignal.timeout is absent from React Native's polyfill, so the deadline
- * is built from an AbortController.
- */
-async function getJson(url: string): Promise<any | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-const cleanHtml = (s: string): string =>
-  (s ?? "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&[a-z]+;/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-const titleCase = (s: string) => (s ?? "").replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
 /**
  * Skill terms worth matching a CV against.
@@ -112,68 +88,6 @@ function extractSkills(text: string): string[] {
     // Word-boundary-ish check so "go" does not match "going" and "c#" survives.
     return new RegExp(`(^|[^a-z0-9+#.])${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9+#.]|$)`, "i").test(haystack);
   });
-}
-
-/** Infers seniority from the title, since neither source states it. */
-function levelFromTitle(title: string): string {
-  const t = (title ?? "").toLowerCase();
-  if (/\b(senior|sr\.?|lead|principal|staff|head|director)\b/.test(t)) return "Senior";
-  if (/\b(junior|jr\.?|intern|entry|graduate|trainee)\b/.test(t)) return "Entry";
-  return "Mid";
-}
-
-function mapRemotive(j: any): FeedJob | null {
-  const title = (j?.title ?? "").trim();
-  const url = (j?.url ?? "").trim();
-  if (!title || !url) return null;
-
-  const description = cleanHtml(j.description ?? "");
-  const tags: string[] = Array.isArray(j.tags) ? j.tags : [];
-
-  return {
-    id: `remotive_${j.id}`,
-    title,
-    company: (j.company_name ?? "Unknown").trim(),
-    location: (j.candidate_required_location || "Remote").trim(),
-    description,
-    requiredSkills: [...new Set([...extractSkills(`${title} ${description}`), ...tags.map(titleCase).filter((t) => SKILL_VOCAB.some((s) => s.toLowerCase() === t.toLowerCase()))])],
-    type: titleCase(j.job_type ?? "Full-time"),
-    salary: (j.salary ?? "").trim() || "Not disclosed",
-    postedAt: j.publication_date ?? new Date().toISOString(),
-    remote: true,
-    category: titleCase(j.category ?? levelFromTitle(title)),
-    originalUrl: url,
-    sourceLabel: "Remotive",
-    platformId: "remotive",
-    platformName: "Remotive",
-  };
-}
-
-function mapArbeitnow(j: any): FeedJob | null {
-  const title = (j?.title ?? "").trim();
-  const url = (j?.url ?? "").trim();
-  if (!title || !url) return null;
-
-  const description = cleanHtml(j.description ?? "");
-  const tags: string[] = Array.isArray(j.tags) ? j.tags : [];
-
-  return {
-    id: `arbeitnow_${j.slug ?? url}`,
-    title,
-    company: (j.company_name ?? "Unknown").trim(),
-    location: (j.location || (j.remote ? "Remote" : "")).trim() || "Not stated",
-    description,
-    requiredSkills: [...new Set([...extractSkills(`${title} ${description}`), ...tags.map(titleCase).filter((t) => SKILL_VOCAB.some((s) => s.toLowerCase() === t.toLowerCase()))])],
-    type: Array.isArray(j.job_types) && j.job_types.length ? titleCase(j.job_types[0]) : "Full-time",
-    salary: "Not disclosed",
-    postedAt: j.created_at ? new Date(j.created_at * 1000).toISOString() : new Date().toISOString(),
-    remote: Boolean(j.remote),
-    category: levelFromTitle(title),
-    originalUrl: url,
-    sourceLabel: "Arbeitnow",
-    platformId: "arbeitnow",
-    platformName: "Arbeitnow",
-  };
 }
 
 /**
@@ -254,38 +168,24 @@ async function fetchCareerjet(opts: { keywords?: string; location?: string }): P
 }
 
 /**
- * Fetches every source in parallel and merges them.
+ * Fetches the feed.
  *
- * `keywords` and `location` steer Careerjet only — the other two boards have no
- * server-side search worth using here, and are filtered client-side by role.
+ * `keywords` and `location` are passed straight to Careerjet's own search,
+ * which is stricter and cheaper than pulling everything and filtering here.
  */
 export async function fetchLiveJobs(opts: { keywords?: string; location?: string } = {}): Promise<FeedResult> {
-  const [remotive, arbeitnow, careerjet] = await Promise.all([
-    getJson(`${REMOTIVE}?limit=200`),
-    getJson(ARBEITNOW),
-    fetchCareerjet(opts),
-  ]);
+  const careerjet = await fetchCareerjet(opts);
 
-  const sources: string[] = [];
-  const failed: string[] = [];
-  const jobs: FeedJob[] = [];
-
-  if (Array.isArray(remotive?.jobs)) {
-    sources.push("Remotive");
-    jobs.push(...remotive.jobs.map(mapRemotive).filter(Boolean as any as (j: FeedJob | null) => j is FeedJob));
-  } else failed.push("Remotive");
-
-  if (Array.isArray(arbeitnow?.data)) {
-    sources.push("Arbeitnow");
-    jobs.push(...arbeitnow.data.map(mapArbeitnow).filter(Boolean as any as (j: FeedJob | null) => j is FeedJob));
-  } else failed.push("Arbeitnow");
-
-  // Null means unavailable or unconfigured, which is not a failure worth
-  // reporting to the user — an empty array is a real answer.
-  if (careerjet !== null) {
-    if (careerjet.length > 0) sources.push("Careerjet");
-    jobs.push(...careerjet);
+  // Null means unreachable or unconfigured. With one source there is nothing to
+  // fall back to, so this is reported rather than hidden behind other results.
+  if (careerjet === null) {
+    return { jobs: [], sources: [], failed: ["Careerjet"], fetchedAt: new Date().toISOString() };
   }
 
-  return { jobs: dedupe(jobs), sources, failed, fetchedAt: new Date().toISOString() };
+  return {
+    jobs: dedupe(careerjet),
+    sources: careerjet.length > 0 ? ["Careerjet"] : [],
+    failed: [],
+    fetchedAt: new Date().toISOString(),
+  };
 }

@@ -191,6 +191,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [jobSources, setJobSources] = useState<string[]>([]);
+  // Distinct from "no jobs matched": the board itself could not be reached.
+  const [unreachable, setUnreachable] = useState(false);
 
   const [appliedJobIds, setAppliedJobIds] = useState<string[]>([]);
   const [enabledPlatformIds, setEnabledPlatformIds] = useState<string[]>(FEED_SOURCES.map((p) => p.id));
@@ -240,14 +242,16 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       });
       setRawJobs(result.jobs);
       setJobSources(result.sources);
+      setUnreachable(result.failed.length > 0);
       setLastUpdated(result.fetchedAt);
-      if (result.sources.length === 0) {
-        setError("Couldn't reach any job board right now. Pull to refresh to try again.");
-      } else if (result.failed.length > 0) {
-        setError(`${result.failed.join(" and ")} didn't respond, so some listings may be missing.`);
+      // Only a failed request is an error. A source that answers with no
+      // matches is a real answer, and the empty state already explains it.
+      if (result.failed.length > 0) {
+        setError("Couldn't reach the job board right now. Pull down to try again.");
       }
     } catch (e: any) {
-      setError("Couldn't load jobs. Check your connection and pull to refresh.");
+      setUnreachable(true);
+      setError("Couldn't load jobs. Check your connection and pull down to try again.");
     } finally {
       setIsLoading(false);
     }
@@ -288,10 +292,11 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           },
           experienceLevel: j.category,
           jobType: j.type,
-          platformIcon: j.platformId === "remotive" ? "🌍" : "💼",
-          // Both sources publish only postings submitted by the employer, and
-          // every listing links to the original — so these are verified in the
-          // only sense the app can honestly claim.
+          // Read from the source list rather than hardcoded, so a listing never
+          // inherits an icon belonging to a board it did not come from.
+          platformIcon: FEED_SOURCES.find((f) => f.id === j.platformId)?.icon ?? "💼",
+          // Every listing links to the original posting — so these are verified
+          // in the only sense the app can honestly claim.
           verified: true,
           topCompany: false,
         };
@@ -361,7 +366,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     <JobsContext.Provider
       value={{
         jobs, isLoading, error, lastUpdated, jobSources,
-        usingFallback: jobSources.length === 0,
+        usingFallback: unreachable,
         hasCVSkills: cvSkills.length > 0,
         refreshJobs, getMatch, generateCoverLetter,
         appliedJobIds, markApplied,
