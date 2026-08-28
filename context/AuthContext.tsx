@@ -95,7 +95,7 @@ export interface AuthContextType {
   pending2FAUserId: string | null;
   // ── Biometric ───────────────────────────────────────────────────────────────
   biometricAvailable: boolean;
-  biometricType: "FaceID" | "Fingerprint" | "None";
+  biometricType: "Biometrics" | "None";
   // ── Legacy API (backward compat) ────────────────────────────────────────────
   signIn: (email: string, password: string) => Promise<{ require2FA?: boolean; userId?: string; method?: string }>;
   signUp: (data: { name: string; email: string; password: string; phone?: string; consentGiven?: boolean }) => Promise<void>;
@@ -226,7 +226,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [sessionDaysRemaining, setSessionDaysRemaining] = useState(56);
   const [riskLevel, setRiskLevel] = useState<RiskLevel | null>(null);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
-  const [biometricType, setBiometricType] = useState<"FaceID" | "Fingerprint" | "None">("None");
+  const [biometricType, setBiometricType] = useState<"Biometrics" | "None">("None");
 
   const sessionTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   // Kept in memory only (never persisted) so we can auto-login right after the

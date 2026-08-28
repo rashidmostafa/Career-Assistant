@@ -351,12 +351,12 @@ export default function SecurityScreen() {
       {/* ── Biometric ── */}
       {biometricAvailable && (
         <>
-          <SectionHeader title="Biometric Authentication" icon={biometricType === "FaceID" ? "😶" : "👆"} colors={colors} />
+          <SectionHeader title="Biometric Authentication" colors={colors} />
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.switchRow}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.switchLabel, { color: colors.foreground }]}>
-                  {biometricType === "FaceID" ? "Face ID" : "Fingerprint"} Login
+                  Biometrics Login
                 </Text>
                 <Text style={[styles.switchSub, { color: colors.mutedForeground }]}>
                   Sign in instantly using biometrics
@@ -371,7 +371,7 @@ export default function SecurityScreen() {
                     trackColor={{ false: colors.border, true: colors.primary }}
                     thumbColor="#fff"
                     accessibilityRole="switch"
-                    accessibilityLabel={`${biometricType} login`}
+                    accessibilityLabel="Biometrics login"
                     accessibilityState={{ checked: user.biometricEnabled }}
                   />
                 )
@@ -462,10 +462,10 @@ export default function SecurityScreen() {
   );
 }
 
-function SectionHeader({ title, icon, colors }: { title: string; icon: string; colors: any }) {
+function SectionHeader({ title, icon, colors }: { title: string; icon?: string; colors: any }) {
   return (
     <View style={styles.sectionHeader}>
-      <Text style={styles.sectionIcon}>{icon}</Text>
+      {icon ? <Text style={styles.sectionIcon}>{icon}</Text> : null}
       <Text style={[styles.sectionTitle, { color: colors.foreground }]}>{title}</Text>
     </View>
   );

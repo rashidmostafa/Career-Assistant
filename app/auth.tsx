@@ -6,7 +6,7 @@
  */
 import {
   AlertCircle, ArrowLeft, Eye, EyeOff,
-  Lock, Mail, Phone, User as UserIcon, Shield,
+  Lock, Mail, Phone, User as UserIcon,
 } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
@@ -14,6 +14,7 @@ import { useRouter } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -322,8 +323,16 @@ export default function AuthScreen() {
           )}
 
           <Animated.View entering={FadeInDown.duration(500).springify().damping(14)} style={styles.brand}>
+            {/* The brand mark, not a stock shield. The wordmark is the Text
+                below, so this is the symbol alone — showing the full lockup
+                here would print "Career Assistant" twice. */}
             <View style={[styles.logoCircle, { backgroundColor: colors.primary + "18", borderColor: colors.primary + "30" }]}>
-              <Shield size={32} color={colors.primary} strokeWidth={2.2} />
+              <Image
+                source={require("@/assets/images/logo-mark.png")}
+                style={styles.logoMark}
+                resizeMode="contain"
+                accessibilityIgnoresInvertColors
+              />
             </View>
             <Text style={[styles.appName, { color: colors.foreground }]}>Career Assistant</Text>
           </Animated.View>
@@ -698,6 +707,8 @@ const styles = StyleSheet.create({
   backBtn: { marginLeft: 20, marginBottom: 4, alignSelf: "flex-start", padding: 4 },
   brand: { alignItems: "center", paddingTop: 8, paddingBottom: 4 },
   logoCircle: { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center", marginBottom: 12, borderWidth: 1 },
+  // contain, so the mark is never cropped by the circle.
+  logoMark: { width: 36, height: 36 },
   appName: { fontFamily: "Inter_700Bold", fontSize: 20, letterSpacing: -0.4 },
   body: { paddingHorizontal: 24, paddingBottom: 40 },
   title: { fontFamily: "Inter_700Bold", fontSize: 26, letterSpacing: -0.6, marginBottom: 6, marginTop: 20 },

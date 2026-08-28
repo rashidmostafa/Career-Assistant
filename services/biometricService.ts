@@ -1,6 +1,7 @@
 /**
  * BiometricService — expo-local-authentication wrapper.
- * Supports Face ID, Touch ID, Fingerprint, and Face Unlock.
+ * Supports every sensor expo-local-authentication exposes — face and
+ * fingerprint alike — and presents them all to the user as "biometrics".
  *
  * Design:
  *  - Raw biometric tokens never leave the device.
@@ -13,7 +14,14 @@ import * as SecureStore from "expo-secure-store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
 
-export type BiometricType = "FaceID" | "Fingerprint" | "None";
+/**
+ * Whether biometric sign-in is usable, not which sensor does it.
+ *
+ * This used to distinguish "FaceID" from "Fingerprint", but every label the
+ * user sees now reads "biometrics", so the distinction had no consumer left —
+ * and "Face ID" is Apple's name for hardware Android phones do not have.
+ */
+export type BiometricType = "Biometrics" | "None";
 
 const CREDENTIAL_ID_KEY   = "auth_biometric_credential_id";   // raw device ID (local only)
 const BIOMETRIC_ENABLED_KEY = "auth_biometric_enabled";        // "true" | absent
@@ -62,9 +70,9 @@ export const BiometricService = {
       if (!compatible) return { available: false, type: "None" };
       const enrolled = await LocalAuthentication.isEnrolledAsync();
       if (!enrolled) return { available: false, type: "None" };
-      const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
-      const hasFace = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
-      return { available: true, type: hasFace ? "FaceID" : "Fingerprint" };
+      // Enrolled hardware is all that matters; the OS picks the sensor and
+      // draws its own prompt, so which one it is changes nothing here.
+      return { available: true, type: "Biometrics" };
     } catch {
       return { available: false, type: "None" };
     }
@@ -75,9 +83,7 @@ export const BiometricService = {
    */
   async getBiometricLabel(): Promise<string> {
     const { type } = await this.getAvailability();
-    if (type === "FaceID") return "Face ID";
-    if (type === "Fingerprint") return "Fingerprint";
-    return "Biometric";
+    return type === "None" ? "Biometric" : "Biometrics";
   },
 
   /**

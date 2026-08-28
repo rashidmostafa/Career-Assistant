@@ -17,9 +17,9 @@ import { SessionManager } from "@/services/sessionManager";
 export interface UseBiometricReturn {
   /** Whether biometric hardware + enrollments are available. */
   available: boolean;
-  /** "FaceID" | "Fingerprint" | "None" */
+  /** "Biometrics" | "None" */
   biometricType: BiometricType;
-  /** Human-readable label, e.g. "Face ID" or "Fingerprint". */
+  /** Human-readable label shown to the user, e.g. "Biometrics". */
   biometricLabel: string;
   /** Whether this device has a registered biometric credential for this account. */
   isEnrolled: boolean;

@@ -2,7 +2,8 @@
  * BiometricButton — prompts native biometric, shows availability state.
  */
 import React, { useRef } from "react";
-import { Animated, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Animated, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Fingerprint } from "lucide-react-native";
 import { useColors } from "@/hooks/useColors";
 import type { BiometricType } from "@/services/biometricService";
 
@@ -20,8 +21,9 @@ export function BiometricButton({ type, onPress, loading = false, disabled = fal
 
   if (type === "None") return null;
 
-  const emoji = type === "FaceID" ? "😶" : "👆";
-  const title = label ?? (type === "FaceID" ? "Sign in with Face ID" : "Sign in with Fingerprint");
+  // One wording for every sensor: naming the hardware told the user which chip
+  // their phone has, not what the button does.
+  const title = label ?? "Sign in with biometrics";
 
   const handlePress = () => {
     Animated.sequence([
@@ -52,9 +54,9 @@ export function BiometricButton({ type, onPress, loading = false, disabled = fal
         ]}
       >
         {loading ? (
-          <Text style={styles.emoji}>⏳</Text>
+          <ActivityIndicator size="small" color={colors.foreground} style={styles.icon} />
         ) : (
-          <Text style={styles.emoji}>{emoji}</Text>
+          <Fingerprint size={26} color={colors.foreground} style={styles.icon} />
         )}
         <View>
           <Text style={[styles.title, { color: colors.foreground }]}>{title}</Text>
@@ -75,7 +77,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 20,
   },
-  emoji: { fontSize: 32 },
+  icon: { width: 30, alignItems: "center" },
   title: { fontFamily: "Inter_700Bold", fontSize: 15 },
   sub:   { fontFamily: "Inter_500Medium", fontSize: 12, marginTop: 2 },
 });

@@ -202,11 +202,11 @@ describe("BiometricService", () => {
     BiometricService = require("../services/biometricService").BiometricService;
   });
 
-  test("getAvailability returns { available: true, type: 'FaceID' } (mocked)", async () => {
+  test("getAvailability reports biometrics when hardware is enrolled (mocked)", async () => {
     const { available, type } = await BiometricService.getAvailability();
     expect(available).toBe(true);
     // Mocked supportedAuthenticationTypesAsync returns [1, 2], 2 = FACIAL_RECOGNITION
-    expect(["FaceID", "Fingerprint"]).toContain(type);
+    expect(type).toBe("Biometrics");
   });
 
   test("authenticate returns success: true when mock succeeds", async () => {
@@ -798,7 +798,7 @@ describe("Biometric — BiometricService.biometricLogin", () => {
 });
 
 describe("Biometric — getBiometricLabel", () => {
-  test("returns 'Face ID' when FACIAL_RECOGNITION is supported", async () => {
+  test("says 'Biometrics' for a face sensor, not the hardware's name", async () => {
     const LocalAuth = require("expo-local-authentication");
     LocalAuth.hasHardwareAsync.mockResolvedValueOnce(true);
     LocalAuth.isEnrolledAsync.mockResolvedValueOnce(true);
@@ -807,10 +807,10 @@ describe("Biometric — getBiometricLabel", () => {
     ]);
     const { BiometricService } = require("../services/biometricService");
     const label = await BiometricService.getBiometricLabel();
-    expect(label).toBe("Face ID");
+    expect(label).toBe("Biometrics");
   });
 
-  test("returns 'Fingerprint' when only fingerprint is supported", async () => {
+  test("says 'Biometrics' for a fingerprint sensor too", async () => {
     const LocalAuth = require("expo-local-authentication");
     LocalAuth.hasHardwareAsync.mockResolvedValueOnce(true);
     LocalAuth.isEnrolledAsync.mockResolvedValueOnce(true);
@@ -819,7 +819,7 @@ describe("Biometric — getBiometricLabel", () => {
     ]);
     const { BiometricService } = require("../services/biometricService");
     const label = await BiometricService.getBiometricLabel();
-    expect(label).toBe("Fingerprint");
+    expect(label).toBe("Biometrics");
   });
 
   test("returns 'Biometric' when hardware is unavailable", async () => {

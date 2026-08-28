@@ -220,7 +220,7 @@ export default function ReauthScreen() {
         <View style={styles.methodList}>
           {biometricAvailable && (
             <MethodCard
-              icon="👆" title={biometricType === "FaceID" ? "Face ID" : "Fingerprint"}
+              title="Biometrics"
               desc="Fastest — one touch to continue"
               color={colors.primary} bg={colors.primary + "18"} border={colors.primary + "40"}
               onPress={() => { setMethod("biometric"); setTimeout(handleBiometric, 200); }}

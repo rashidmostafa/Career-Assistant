@@ -1,30 +1,35 @@
 {
   "expo": {
-    "name": "CareerAI",
+    "name": "Career Assistant",
     "slug": "career-assistant",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/logo.png",
+    "icon": "./assets/images/icon.png",
     "scheme": "career-assistant",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/images/logo.png",
+      "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0f172a"
+      "backgroundColor": "#ffffff",
+      "dark": {
+        "image": "./assets/images/splash-icon-dark.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#0f172a"
+      }
     },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.anonymous.careerassistant",
       "infoPlist": {
-        "NSFaceIDUsageDescription": "Use Face ID to securely sign in to Career Assistant",
+        "NSFaceIDUsageDescription": "Use biometrics to securely sign in to Career Assistant",
         "NSCameraUsageDescription": "Camera access is required for QR code scanning during 2FA setup"
       }
     },
     "android": {
       "package": "com.anonymous.careerassistant",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/logo.png",
-        "backgroundColor": "#0f172a"
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
       },
       "permissions": [
         "USE_BIOMETRIC",
@@ -52,7 +57,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/images/logo.png",
+      "favicon": "./assets/images/favicon.png",
       "bundler": "metro"
     },
     "plugins": [
@@ -63,14 +68,14 @@
       [
         "expo-local-authentication",
         {
-          "faceIDPermission": "Use Face ID to securely sign in to Career Assistant"
+          "faceIDPermission": "Use biometrics to securely sign in to Career Assistant"
         }
       ],
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/logo.png",
-          "color": "#6366f1",
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#0768f8",
           "defaultChannel": "security-reminders"
         }
       ]
