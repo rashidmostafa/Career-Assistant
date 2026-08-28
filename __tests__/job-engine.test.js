@@ -28,6 +28,26 @@ describe("rule 1 — only jobs for the target role", () => {
     expect(isRelevantToRole(job("Senior Nurse Practitioner"), "Senior Backend Engineer")).toBe(false);
   });
 
+  it("does not let a shared job-title noun qualify a different discipline", () => {
+    // Measured against real Careerjet results: a Software Engineer search was
+    // returning Junior Structural Engineer, because both contain "engineer".
+    expect(isRelevantToRole(job("Junior Structural Engineer"), "Software Engineer")).toBe(false);
+    expect(isRelevantToRole(job("Sales Manager"), "Product Manager")).toBe(false);
+    expect(isRelevantToRole(job("Laboratory Technician"), "Network Technician")).toBe(false);
+  });
+
+  it("separates specialisms that share a discipline", () => {
+    expect(isRelevantToRole(job("Software Engineer (Frontend)"), "Backend Engineer")).toBe(false);
+    expect(isRelevantToRole(job("Backend Engineer"), "Backend Engineer")).toBe(true);
+    expect(isRelevantToRole(job("Senior Backend Developer"), "Backend Engineer")).toBe(true);
+  });
+
+  it("still matches when the target is only a generic word", () => {
+    // "Engineer" alone has nothing to discriminate on; showing nothing would be
+    // worse than showing engineering roles.
+    expect(isRelevantToRole(job("Structural Engineer"), "Engineer")).toBe(true);
+  });
+
   it("shows everything when no target role is set", () => {
     expect(isRelevantToRole(job("Anything At All"), "")).toBe(true);
   });

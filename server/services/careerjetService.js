@@ -84,12 +84,16 @@ async function searchCareerjet({ keywords, location, userIp, userAgent, pageSize
   const params = new URLSearchParams({
     locale_code: LOCALE,
     sort: "date",
-    // Careerjet returns an excerpt, not the posting, and defaults it to 120
-    // characters. That is far too little to identify the skills a role asks
-    // for: measured excerpts averaged 242 characters and most yielded no
-    // skills at all, so every Bangladeshi listing would have shown "no match
-    // score" while Remotive jobs — which carry full descriptions — scored
-    // normally. Asking for more text is what makes the two comparable.
+    // Requested, but measured not to be honoured: excerpts come back at
+    // 224-258 characters whether this is 120, absent, or 1500. Kept because it
+    // costs nothing and Careerjet may start respecting it, but nothing should
+    // be built on the assumption that it works.
+    //
+    // The consequence is real and unavoidable from our side: with ~242
+    // characters of text, only about a quarter of Careerjet listings yield
+    // enough to identify required skills, against roughly three quarters of
+    // Remotive's, which carry full descriptions. Listings we cannot score show
+    // no match rather than 0% — see JobListing.skillMatch.applicable.
     fragment_size: String(FRAGMENT_SIZE),
     page_size: String(Math.min(Math.max(pageSize, 1), 100)),
     // Required by Careerjet's terms: the end user whose action triggered this.

@@ -32,13 +32,13 @@ describe("v4 contract", () => {
     expect(src).toMatch(/process\.env\.CAREERJET_LOCALE/);
   });
 
-  it("asks for a usable excerpt, not Careerjet's 120-character default", () => {
-    // At the default, most listings yield no parseable skills and every
-    // Bangladeshi job shows no match score beside fully-scored remote ones.
+  it("asks for a larger excerpt, while documenting that Careerjet ignores it", () => {
     expect(src).toMatch(/fragment_size/);
     const m = src.match(/CAREERJET_FRAGMENT_SIZE \?\? (\d+)/);
     expect(m).not.toBeNull();
     expect(Number(m[1])).toBeGreaterThanOrEqual(1000);
+    // The comment must not claim an effect that measurement disproved.
+    expect(src).toMatch(/measured not to be honoured/i);
   });
 
   it("respects the documented page_size ceiling of 100", () => {

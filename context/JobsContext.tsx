@@ -76,6 +76,21 @@ const JobsContext = createContext<JobsContextType | undefined>(undefined);
 /** Words that carry no signal when deciding whether a job fits a role. */
 const STOP = new Set(["a", "an", "the", "and", "or", "of", "for", "in", "at", "to", "with", "senior", "junior", "lead", "mid", "level", "i", "ii", "iii"]);
 
+/**
+ * Job-title nouns that appear in every discipline and so discriminate nothing.
+ *
+ * Matching on any term meant "engineer" alone qualified a listing: a search for
+ * Software Engineer returned Junior Structural Engineer, and a Backend Engineer
+ * target returned frontend and QA roles. These are the words that make a title
+ * sound like a job without saying which job.
+ */
+const GENERIC_ROLE_WORDS = new Set([
+  "engineer", "engineering", "developer", "development", "manager", "management",
+  "specialist", "analyst", "executive", "officer", "associate", "consultant",
+  "assistant", "coordinator", "administrator", "technician", "intern",
+  "internship", "staff", "expert", "professional", "team", "support",
+]);
+
 function roleTerms(targetRole: string): string[] {
   return (targetRole ?? "")
     .toLowerCase()
@@ -96,7 +111,16 @@ export function isRelevantToRole(job: Pick<FeedJob, "title" | "category">, targe
   if (terms.length === 0) return true;   // no role set: show everything
 
   const haystack = `${job.title} ${job.category}`.toLowerCase();
-  return terms.some((term) => haystack.includes(term));
+
+  // The discriminating words — "software", "backend", "data" — not the ones
+  // every job title contains.
+  const distinctive = terms.filter((t) => !GENERIC_ROLE_WORDS.has(t));
+
+  // A target made only of generic words ("Engineer", "Manager") has nothing to
+  // discriminate on, so fall back to matching those rather than showing nothing.
+  if (distinctive.length === 0) return terms.some((t) => haystack.includes(t));
+
+  return distinctive.some((t) => haystack.includes(t));
 }
 
 export function JobsProvider({ children }: { children: React.ReactNode }) {
