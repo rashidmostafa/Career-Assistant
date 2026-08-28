@@ -106,3 +106,43 @@ describe("unconfigured", () => {
     expect(await searchCareerjet({ keywords: "x" })).toEqual({ ok: false, reason: "not_configured", jobs: [] });
   });
 });
+
+/**
+ * Job ids must be unique per posting.
+ *
+ * They were built as base64 of the url truncated to 24 characters. Base64
+ * encodes three bytes per four characters, so that captured only the first 18
+ * bytes — "https://www.career" — which every Careerjet url shares. Every
+ * listing therefore carried an identical id: React saw duplicate keys, each
+ * card read another job's match score, and marking one applied applied them all.
+ */
+describe("listing ids", () => {
+  const { mapJob } = require("../services/careerjetService");
+
+  const job = (url, title = "Backend Engineer") => ({ title, url, company: "Acme", locations: "Dhaka" });
+
+  it("gives urls sharing a long prefix different ids", () => {
+    const urls = [
+      "https://www.careerjet.com.bd/jobad/bd0000000000000000001",
+      "https://www.careerjet.com.bd/jobad/bd0000000000000000002",
+      "https://www.careerjet.com.bd/jobad/bd0000000000000000003",
+    ];
+    const ids = urls.map((u) => mapJob(job(u)).id);
+    expect(new Set(ids).size).toBe(urls.length);
+  });
+
+  it("is stable for the same url", () => {
+    const u = "https://www.careerjet.com.bd/jobad/abc";
+    expect(mapJob(job(u)).id).toBe(mapJob(job(u, "Different Title")).id);
+  });
+
+  it("differs when only the last character of the url differs", () => {
+    const a = mapJob(job("https://www.careerjet.com.bd/jobad/aaaa")).id;
+    const b = mapJob(job("https://www.careerjet.com.bd/jobad/aaab")).id;
+    expect(a).not.toBe(b);
+  });
+
+  it("drops a listing with no url rather than giving it a shared id", () => {
+    expect(mapJob({ title: "Backend Engineer", url: "" })).toBeNull();
+  });
+});

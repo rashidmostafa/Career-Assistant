@@ -217,7 +217,17 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           AsyncStorage.getItem(platformsKey),
         ]);
         if (cancelled) return;
-        if (a) setAppliedJobIds(JSON.parse(a));
+        if (a) {
+          // Applied ids name a listing from a specific board. Ids belonging to
+          // a board the app no longer reads can never match anything on screen,
+          // so they only inflate the "Jobs Applied" figure on the dashboard.
+          // Dropping them here means a device already holding stale ids repairs
+          // itself on next launch rather than needing a sign-out to rehydrate.
+          const stored: string[] = JSON.parse(a);
+          const live = stored.filter((id) => FEED_SOURCES.some((f) => id.startsWith(`${f.id}_`)));
+          setAppliedJobIds(live);
+          if (live.length !== stored.length) void AsyncStorage.setItem(appliedKey, JSON.stringify(live));
+        }
         if (p) {
           const stored: string[] = JSON.parse(p);
           const valid = stored.filter((id) => FEED_SOURCES.some((f) => f.id === id));

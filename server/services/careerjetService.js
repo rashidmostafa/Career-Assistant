@@ -13,6 +13,8 @@
  *
  * Docs: https://www.careerjet.com/partners/api
  */
+
+const crypto = require("crypto");
 const API_URL = "https://search.api.careerjet.net/v4/query";
 
 const API_KEY = process.env.CAREERJET_API_KEY ?? "";
@@ -51,7 +53,12 @@ function mapJob(j) {
   if (!title || !url) return null;
 
   return {
-    id: `careerjet_${Buffer.from(url).toString("base64").slice(0, 24)}`,
+    // A hash of the WHOLE url. Truncating base64 of the url gave every listing
+    // the same id: 24 base64 characters encode only the first 18 bytes, and
+    // every Careerjet url starts with the same "https://www.career". The feed
+    // then rendered duplicate React keys, every card read the same match, and
+    // marking one job applied marked all of them.
+    id: `careerjet_${crypto.createHash("sha1").update(url).digest("hex").slice(0, 20)}`,
     title,
     company: clean(j.company) || "Unknown",
     location: clean(j.locations) || "Bangladesh",
@@ -159,4 +166,4 @@ async function searchCareerjet({ keywords, location, userIp, userAgent, pageSize
   }
 }
 
-module.exports = { searchCareerjet, isConfigured, LOCALE, REFERER };
+module.exports = { searchCareerjet, isConfigured, mapJob, LOCALE, REFERER };

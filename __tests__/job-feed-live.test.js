@@ -43,8 +43,11 @@ test("fetches real listings from live sources", async () => {
 });
 
 describe("dedupe", () => {
+  // Every real listing carries a unique id, derived from its own url. Omitting
+  // it here made these fixtures unlike anything the feed produces.
+  let n = 0;
   const j = (company, title, over = {}) => ({
-    company, title, requiredSkills: [], description: "", ...over,
+    id: `careerjet_fixture${n++}`, company, title, requiredSkills: [], description: "", ...over,
   });
 
   it("collapses the same role syndicated to two boards", () => {

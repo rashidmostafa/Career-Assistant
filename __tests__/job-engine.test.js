@@ -182,3 +182,60 @@ describe("rule 1 — spelling variants of the same role", () => {
     expect(isRelevantToRole(job("Senior Golang Developer"), "Backend Engineer")).toBe(false);
   });
 });
+
+/**
+ * Rule 4, second half: unique ids, not just unique openings.
+ *
+ * Careerjet built ids from base64 of the url truncated to 24 characters, which
+ * captured only the shared "https://www.career" prefix and gave every listing
+ * the same id. Deduping by company and title alone let those through.
+ */
+describe("rule 4 — listings never share an id", () => {
+  const { dedupe } = require("../services/jobFeedService");
+  const job = (id, title, company) => ({
+    id, title, company, description: "", requiredSkills: [], location: "Dhaka",
+    type: "Full-time", salary: "", postedAt: "", remote: false, category: "Mid",
+    originalUrl: "https://x", sourceLabel: "s", platformId: "careerjet", platformName: "Careerjet",
+  });
+
+  it("drops a second job carrying an id already used", () => {
+    const out = dedupe([job("same", "Backend Engineer", "Acme"), job("same", "Frontend Engineer", "Globex")]);
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toBe("Backend Engineer");
+  });
+
+  it("keeps distinct openings that have distinct ids", () => {
+    const out = dedupe([job("a", "Backend Engineer", "Acme"), job("b", "Frontend Engineer", "Globex")]);
+    expect(out).toHaveLength(2);
+  });
+
+  it("never emits a repeated key for the list to render", () => {
+    const out = dedupe([job("a", "A", "X"), job("a", "B", "Y"), job("b", "C", "Z"), job("", "D", "W")]);
+    expect(new Set(out.map((j) => j.id)).size).toBe(out.length);
+  });
+});
+
+/**
+ * Applied ids outlive the board that issued them.
+ *
+ * "Jobs Applied" on the dashboard is the length of this list, so an id from a
+ * removed source keeps counting forever against a job that can no longer appear.
+ */
+describe("applied jobs drop ids from boards no longer read", () => {
+  const { FEED_SOURCES } = require("../constants/jobPlatforms");
+  const live = (ids) => ids.filter((id) => FEED_SOURCES.some((f) => id.startsWith(`${f.id}_`)));
+
+  it("keeps ids from a current source", () => {
+    expect(live(["careerjet_455c01ad11e520170e43"])).toHaveLength(1);
+  });
+
+  it("drops ids from a removed source", () => {
+    // The exact value found in the database, from a board the feed dropped.
+    expect(live(["arbeitnow_senior-backend-engineer-subscriptions-london-346554"])).toHaveLength(0);
+    expect(live(["remotive_12345"])).toHaveLength(0);
+  });
+
+  it("does not match a source name appearing without its separator", () => {
+    expect(live(["careerjetsomething"])).toHaveLength(0);
+  });
+});

@@ -126,7 +126,22 @@ export function dedupe(jobs: FeedJob[]): FeedJob[] {
         job.description.length > existing.description.length);
     if (better) best.set(key, job);
   }
-  return [...best.values()];
+
+  // Ids come from whichever board supplied the listing, so a bug there can hand
+  // the list two rows with one key. That surfaced once as a React duplicate-key
+  // warning, but the damage was quieter: every card read the first job's match
+  // score, and marking one applied marked them all. Two distinct openings that
+  // share an id is a source fault, so the later one is dropped rather than
+  // rendered under a key that already means another job.
+  const seen = new Set<string>();
+  return [...best.values()].filter((j) => {
+    if (!j.id || seen.has(j.id)) {
+      console.warn(`[jobs] dropped a listing with a duplicate id: ${j.id || "(empty)"} — ${j.title}`);
+      return false;
+    }
+    seen.add(j.id);
+    return true;
+  });
 }
 
 /**
