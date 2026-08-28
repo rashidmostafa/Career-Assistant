@@ -96,3 +96,89 @@ describe("rule 5 — match comes from the CV's skills", () => {
     expect(matchTier(20)).toBe("low");
   });
 });
+
+/**
+ * Feed sources vs. link-out sites.
+ *
+ * These were once one list, so the feed filtered its own results against a set
+ * of ids that contained neither Remotive nor Arbeitnow. Both boards were
+ * dropped in full and never reached the user.
+ */
+describe("feed sources are separate from link-out sites", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const { FEED_SOURCES, JOB_PLATFORMS } = require("../constants/jobPlatforms");
+
+  const read = (p) => fs.readFileSync(path.join(__dirname, "..", p), "utf8");
+
+  // Every platformId any source can actually emit, taken from the code itself
+  // so a new board added later cannot quietly bypass this check.
+  const emitted = [
+    ...read("services/jobFeedService.ts").matchAll(/platformId:\s*"([^"]+)"/g),
+    ...read("server/services/careerjetService.js").matchAll(/platformId:\s*"([^"]+)"/g),
+  ].map((m) => m[1]);
+
+  it("emits at least one id per live board", () => {
+    expect(new Set(emitted)).toEqual(new Set(["remotive", "arbeitnow", "careerjet"]));
+  });
+
+  it("passes every emitted id through the default filter", () => {
+    const enabledByDefault = FEED_SOURCES.map((s) => s.id);
+    for (const id of emitted) expect(enabledByDefault).toContain(id);
+  });
+
+  it("does not offer Careerjet as a link-out, since its jobs are in the feed", () => {
+    expect(JOB_PLATFORMS.map((p) => p.id)).not.toContain("careerjet");
+  });
+
+  it("keeps link-out sites out of the feed filter", () => {
+    // bdjobs, LinkedIn and the rest have no API here; listing them as feed
+    // sources would show toggles that can never produce a job.
+    for (const p of JOB_PLATFORMS) {
+      expect(FEED_SOURCES.map((s) => s.id)).not.toContain(p.id);
+    }
+  });
+});
+
+/**
+ * Titles punctuate the same word every possible way.
+ *
+ * Taken from a live Arbeitnow pull: of 179 listings, "Back End Engineer" was
+ * rejected for a Backend Engineer target purely because of the space.
+ */
+describe("rule 1 — spelling variants of the same role", () => {
+  const job = (title) => ({ title, category: "Mid" });
+
+  it("treats a space or hyphen as part of the word", () => {
+    for (const t of ["Back End Engineer", "Back-End Engineer", "Backend Engineer"]) {
+      expect(isRelevantToRole(job(t), "Backend Engineer")).toBe(true);
+    }
+    expect(isRelevantToRole(job("Front-End Developer"), "Frontend Developer")).toBe(true);
+    expect(isRelevantToRole(job("Full Stack Engineer"), "Fullstack Engineer")).toBe(true);
+  });
+
+  it("accepts the industry's other name for the same role", () => {
+    expect(isRelevantToRole(job("Site Reliability Engineer"), "DevOps Engineer")).toBe(true);
+    expect(isRelevantToRole(job("Machine Learning Engineer"), "ML Engineer")).toBe(true);
+    expect(isRelevantToRole(job("QA Automation Engineer"), "Quality Assurance Engineer")).toBe(true);
+  });
+
+  it("still rejects the roles that shipped the strict filter", () => {
+    expect(isRelevantToRole(job("Junior Structural Engineer"), "Software Engineer")).toBe(false);
+    expect(isRelevantToRole(job("Frontend Developer"), "Backend Engineer")).toBe(false);
+    expect(isRelevantToRole(job("Content Reviewer - English US"), "Backend Engineer")).toBe(false);
+  });
+
+  it("does not let a short term match inside a longer word", () => {
+    // Joining words to compare them must not make "ai" appear inside "retail".
+    expect(isRelevantToRole(job("Retail Assistant"), "AI Engineer")).toBe(false);
+    expect(isRelevantToRole(job("Data Entry Clerk"), "QA Engineer")).toBe(false);
+  });
+
+  it("does not treat a role's technologies as the role", () => {
+    // Mapping "backend" onto every server language would match any listing
+    // that names one, including frontend roles that mention the stack.
+    expect(isRelevantToRole(job("React Developer (Java backend team)"), "Backend Engineer")).toBe(true);
+    expect(isRelevantToRole(job("Senior Golang Developer"), "Backend Engineer")).toBe(false);
+  });
+});

@@ -18,7 +18,7 @@ import { useAuth } from "./AuthContext";
 import { useCV } from "./CVContext";
 import { fetchLiveJobs, type FeedJob } from "@/services/jobFeedService";
 import { computeJobMatch, type JobMatchResult } from "@/utils/jobMatch";
-import { JOB_PLATFORMS, mapUserExperienceToJobLevel } from "@/constants/jobPlatforms";
+import { FEED_SOURCES, mapUserExperienceToJobLevel } from "@/constants/jobPlatforms";
 import { chatJSON, isAIConfigured } from "@/services/aiClient";
 
 export interface JobListing extends FeedJob {
@@ -91,11 +91,58 @@ const GENERIC_ROLE_WORDS = new Set([
   "internship", "staff", "expert", "professional", "team", "support",
 ]);
 
+/**
+ * Words the industry uses for the same role.
+ *
+ * Only genuine renamings of the role itself, never the technologies it happens
+ * to use: mapping "backend" onto Java, Go and PHP would pull in any listing
+ * that mentions a language, which is how a role filter stops filtering.
+ */
+const ROLE_SYNONYMS: Record<string, string[]> = {
+  backend: ["server side"],
+  frontend: ["client side"],
+  devops: ["sre", "site reliability"],
+  sre: ["devops", "site reliability"],
+  ml: ["machine learning"],
+  ai: ["artificial intelligence"],
+  qa: ["quality assurance", "sdet"],
+  security: ["infosec", "information security", "cybersecurity"],
+  mobile: ["android", "ios", "react native", "flutter"],
+  // Reverse directions, so the mapping works whichever name the user typed.
+  qualityassurance: ["qa", "sdet"],
+  machinelearning: ["ml"],
+  artificialintelligence: ["ai"],
+  sitereliability: ["sre", "devops"],
+};
+
 function roleTerms(targetRole: string): string[] {
   return (targetRole ?? "")
     .toLowerCase()
     .split(/[^a-z0-9+#.]+/)
     .filter((w) => w.length > 1 && !STOP.has(w));
+}
+
+/** "Back-End" and "Back End" are the same word as "backend". */
+const tighten = (s: string) => s.toLowerCase().replace(/[^a-z0-9+#]/g, "");
+const spaced = (s: string) => s.toLowerCase().replace(/[^a-z0-9+#]+/g, " ").trim();
+
+/**
+ * Whether one role word appears in a title.
+ *
+ * Two passes, because job titles punctuate the same word every possible way.
+ * Whole-word matching on the spaced title keeps short terms like "qa" and "ai"
+ * from matching inside longer words; the joined form then catches the spellings
+ * that only differ by a space or hyphen. That second pass is limited to longer
+ * terms so "go" cannot match "Go-to-Market Manager".
+ */
+function termMatches(term: string, title: string): boolean {
+  const t = tighten(term);
+  if (!t) return false;
+
+  const asWord = new RegExp(`(^| )${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(s|es|ing)?( |$)`);
+  if (asWord.test(spaced(title))) return true;
+
+  return t.length >= 5 && tighten(title).includes(t);
 }
 
 /**
@@ -104,7 +151,6 @@ function roleTerms(targetRole: string): string[] {
  * Matched on the title rather than the description: nearly every engineering
  * post mentions "engineer" somewhere in its boilerplate, so description
  * matching returns the whole feed and the filter stops meaning anything.
- * A term also matches its own stem, so "engineering" satisfies "engineer".
  */
 export function isRelevantToRole(
   job: Pick<FeedJob, "title" | "category">,
@@ -114,7 +160,13 @@ export function isRelevantToRole(
   const terms = roleTerms(targetRole);
   if (terms.length === 0) return true;   // no role set: show everything
 
-  const haystack = `${job.title} ${job.category}`.toLowerCase();
+  const haystack = `${job.title} ${job.category}`;
+
+  // Every accepted spelling of what the user typed, looked up both per word
+  // and across the whole role — "quality assurance" is one name, not two words.
+  const phrase = ROLE_SYNONYMS[tighten(targetRole.replace(/\b(engineer|developer|specialist)\b/gi, ""))] ?? [];
+  const expand = (list: string[]) =>
+    [...list.flatMap((t) => [t, ...(ROLE_SYNONYMS[tighten(t)] ?? [])]), ...phrase];
 
   // The discriminating words — "software", "backend", "data" — not the ones
   // every job title contains.
@@ -122,13 +174,12 @@ export function isRelevantToRole(
 
   // Relaxed matching accepts any term, generic ones included, which is the
   // "same broad discipline" test. Only used when strict matching found nothing.
-  if (opts.relaxed) return terms.some((t) => haystack.includes(t));
+  if (opts.relaxed) return expand(terms).some((t) => termMatches(t, haystack));
 
   // A target made only of generic words ("Engineer", "Manager") has nothing to
   // discriminate on, so fall back to matching those rather than showing nothing.
-  if (distinctive.length === 0) return terms.some((t) => haystack.includes(t));
-
-  return distinctive.some((t) => haystack.includes(t));
+  const use = distinctive.length === 0 ? terms : distinctive;
+  return expand(use).some((t) => termMatches(t, haystack));
 }
 
 export function JobsProvider({ children }: { children: React.ReactNode }) {
@@ -142,7 +193,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const [jobSources, setJobSources] = useState<string[]>([]);
 
   const [appliedJobIds, setAppliedJobIds] = useState<string[]>([]);
-  const [enabledPlatformIds, setEnabledPlatformIds] = useState<string[]>(JOB_PLATFORMS.map((p) => p.id));
+  const [enabledPlatformIds, setEnabledPlatformIds] = useState<string[]>(FEED_SOURCES.map((p) => p.id));
   const [filters, setFiltersState] = useState<JobFilters>(NO_FILTERS);
   // Letters are kept for the session so reopening a job shows what was written
   // rather than silently charging another model call for the same thing.
@@ -165,7 +216,13 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         ]);
         if (cancelled) return;
         if (a) setAppliedJobIds(JSON.parse(a));
-        if (p) setEnabledPlatformIds(JSON.parse(p));
+        if (p) {
+          const stored: string[] = JSON.parse(p);
+          const valid = stored.filter((id) => FEED_SOURCES.some((f) => f.id === id));
+          // Anything saved before feeds and link-outs were separated refers to
+          // sites that produce no listings; honouring it would empty the feed.
+          setEnabledPlatformIds(valid.length ? valid : FEED_SOURCES.map((f) => f.id));
+        }
       } catch { /* defaults stand */ }
     })();
     return () => { cancelled = true; };
@@ -278,7 +335,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   }, [platformsKey]);
 
   const setAllPlatformsEnabled = useCallback(async (enabled: boolean) => {
-    const next = enabled ? JOB_PLATFORMS.map((p) => p.id) : [];
+    const next = enabled ? FEED_SOURCES.map((p) => p.id) : [];
     setEnabledPlatformIds(next);
     if (platformsKey) await AsyncStorage.setItem(platformsKey, JSON.stringify(next));
   }, [platformsKey]);

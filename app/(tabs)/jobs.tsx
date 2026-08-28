@@ -22,7 +22,7 @@ import { useJobs, type JobListing } from "@/context/JobsContext";
 import { exportAsPdf, exportAsWord } from "@/services/cvExport";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
-import { JOB_PLATFORMS, PLATFORM_CATEGORY_LABELS, BD_LOCATIONS, JOB_TYPES, JOB_EXPERIENCE_LEVELS, getPlatformSearchUrl, type JobPlatform, PlatformCategory } from "@/constants/jobPlatforms";
+import { JOB_PLATFORMS, FEED_SOURCES, PLATFORM_CATEGORY_LABELS, BD_LOCATIONS, JOB_TYPES, JOB_EXPERIENCE_LEVELS, getPlatformSearchUrl, type JobPlatform, PlatformCategory } from "@/constants/jobPlatforms";
 import { showAlert } from "@/utils/alert";
 import { RoleSwitcher } from "@/components/RoleSwitcher";
 
@@ -75,7 +75,7 @@ export default function JobsScreen() {
     (filters.location ? 1 : 0) +
     (filters.jobType ? 1 : 0) +
     (filters.experienceLevel ? 1 : 0) +
-    (enabledPlatformIds.length < JOB_PLATFORMS.length ? 1 : 0);
+    (enabledPlatformIds.length < FEED_SOURCES.length ? 1 : 0);
 
   /** Saves the letter as a file the user can attach to an application. */
   const downloadLetter = async (kind: "pdf" | "word", letter: string, job: JobListing) => {
@@ -193,10 +193,12 @@ export default function JobsScreen() {
               </View>
             </View>
 
-            {PLATFORM_CATEGORIES.map((cat) => (
+            {/* Empty categories are skipped: with only three feeds, a bare
+                heading over no rows reads as a section that failed to load. */}
+            {PLATFORM_CATEGORIES.filter((cat) => FEED_SOURCES.some((p) => p.category === cat)).map((cat) => (
               <View key={cat} style={{ marginBottom: 14 }}>
                 <Text style={[styles.platformCategoryLabel, { color: colors.mutedForeground }]}>{PLATFORM_CATEGORY_LABELS[cat]}</Text>
-                {JOB_PLATFORMS.filter((p) => p.category === cat).map((platform) => {
+                {FEED_SOURCES.filter((p) => p.category === cat).map((platform) => {
                   const enabled = enabledPlatformIds.includes(platform.id);
                   return (
                     <TouchableOpacity
@@ -206,19 +208,9 @@ export default function JobsScreen() {
                     >
                       <Text style={styles.platformIcon}>{platform.icon}</Text>
                       <Text style={[styles.platformName, { color: colors.foreground }]}>{platform.name}</Text>
-                      <TouchableOpacity
-                        onPress={(e) => {
-                          // Stop the press from also toggling the row's filter.
-                          e.stopPropagation();
-                          openJobSite(platform);
-                        }}
-                        hitSlop={8}
-                        style={styles.platformOpenBtn}
-                        accessibilityRole="link"
-                        accessibilityLabel={`Open ${platform.name} in your browser`}
-                      >
-                        <ExternalLink size={16} color={jobsColor} />
-                      </TouchableOpacity>
+                      {/* No "open site" link here: these boards' listings are
+                          already in the feed, so sending the user out would
+                          take them away from jobs the app has fetched. */}
                       <View style={[styles.toggleTrack, { backgroundColor: enabled ? jobsColor : colors.border }]}>
                         <View style={[styles.toggleThumb, { alignSelf: enabled ? "flex-end" : "flex-start", backgroundColor: "#fff" }]} />
                       </View>

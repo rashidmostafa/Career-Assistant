@@ -9,9 +9,29 @@ export interface JobPlatform {
   baseUrl: string;
 }
 
+/**
+ * Boards whose listings are fetched INTO the app.
+ *
+ * Kept separate from JOB_PLATFORMS, which are sites we can only link out to.
+ * Conflating the two broke the feed: it filtered results against the link-out
+ * list, which contains neither Remotive nor Arbeitnow, so every listing from
+ * those two was silently discarded and only Careerjet's survived.
+ */
+export const FEED_SOURCES: JobPlatform[] = [
+  { id: "careerjet", name: "Careerjet", shortName: "Careerjet", icon: "🌐", category: "general", baseUrl: "https://www.careerjet.com.bd" },
+  { id: "remotive", name: "Remotive", shortName: "Remotive", icon: "🌍", category: "international", baseUrl: "https://remotive.com" },
+  { id: "arbeitnow", name: "Arbeitnow", shortName: "Arbeitnow", icon: "💼", category: "international", baseUrl: "https://www.arbeitnow.com" },
+];
+
+/**
+ * Boards reachable only by opening their website.
+ *
+ * Careerjet is deliberately absent: its listings now arrive through the API and
+ * appear in the feed, so sending the user to careerjet.com would take them away
+ * from jobs the app already has.
+ */
 export const JOB_PLATFORMS: JobPlatform[] = [
   { id: "bdjobs", name: "Bdjobs.com", shortName: "Bdjobs", icon: "🇧🇩", category: "general", baseUrl: "https://www.bdjobs.com" },
-  { id: "careerjet", name: "Careerjet.com.bd", shortName: "Careerjet", icon: "🌐", category: "general", baseUrl: "https://www.careerjet.com.bd" },
   { id: "atbjobs", name: "atB Jobs", shortName: "atB Jobs", icon: "🇧🇩", category: "general", baseUrl: "https://www.atbjobs.com" },
   { id: "shomvob", name: "Shomvob", shortName: "Shomvob", icon: "🛠️", category: "blue-collar", baseUrl: "https://shomvob.co" },
   { id: "ezjobs", name: "EZ Jobs", shortName: "EZ Jobs", icon: "🛠️", category: "blue-collar", baseUrl: "https://ezjobs.io" },
