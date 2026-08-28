@@ -59,7 +59,12 @@ router.get("/search", authenticate, async (req, res, next) => {
       /^\d{1,3}(\.\d{1,3}){3}$/.test(ip) &&
       !/^(10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip);
 
-    const rawIp = (req.ip || "").replace(/^::ffff:/, "");
+    // Render puts more than one proxy in front of the app, so Express's req.ip
+    // (the last forwarded hop with trust proxy: 1) is an internal 10.x address.
+    // The original client is the first entry of X-Forwarded-For.
+    const forwarded = String(req.headers["x-forwarded-for"] ?? "")
+      .split(",").map((v) => v.trim().replace(/^::ffff:/, "")).filter(Boolean);
+    const rawIp = forwarded.find(isPublicIp) ?? (req.ip || "").replace(/^::ffff:/, "");
     const userIp = isPublicIp(rawIp) ? rawIp : null;
 
     const result = await searchCareerjet({

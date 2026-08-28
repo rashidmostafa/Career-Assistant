@@ -20,6 +20,14 @@ const API_KEY = process.env.CAREERJET_API_KEY ?? "";
 // Careerjet's partner login, and an unsupported code returns HTTP 400 rather
 // than an empty result.
 const LOCALE = process.env.CAREERJET_LOCALE ?? "en_BD";
+
+/**
+ * Careerjet rejects any call without a Referer, and it must identify the
+ * publisher site registered against the key — "Undeclared referrer. Please add
+ * a Referer header." Not optional, and not documented alongside the other
+ * required parameters, which is why it was missed.
+ */
+const REFERER = process.env.CAREERJET_REFERER ?? "https://strong-bonbon-4e6573.netlify.app";
 const TIMEOUT_MS = Number(process.env.CAREERJET_TIMEOUT_MS ?? 15000);
 
 const isConfigured = () => API_KEY.length > 0;
@@ -91,7 +99,11 @@ async function searchCareerjet({ keywords, location, userIp, userAgent, pageSize
 
   try {
     const res = await fetch(`${API_URL}?${params}`, {
-      headers: { Authorization: authHeader(), Accept: "application/json" },
+      headers: {
+        Authorization: authHeader(),
+        Accept: "application/json",
+        Referer: REFERER,
+      },
       signal: controller.signal,
     });
 
@@ -107,6 +119,7 @@ async function searchCareerjet({ keywords, location, userIp, userAgent, pageSize
       const reason =
         res.status === 400 ? "bad_locale"
         : res.status === 403 && /unauthorized access from ip/i.test(message) ? "ip_not_whitelisted"
+        : res.status === 403 && /referrer|referer/i.test(message) ? "bad_referer"
         : res.status === 403 ? "missing_user_context"
         : `http_${res.status}`;
 
@@ -134,4 +147,4 @@ async function searchCareerjet({ keywords, location, userIp, userAgent, pageSize
   }
 }
 
-module.exports = { searchCareerjet, isConfigured, LOCALE };
+module.exports = { searchCareerjet, isConfigured, LOCALE, REFERER };

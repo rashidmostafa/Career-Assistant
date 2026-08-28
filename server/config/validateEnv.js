@@ -66,6 +66,10 @@ function validateEnv({ strict = process.env.NODE_ENV === "production" } = {}) {
     warnings.push("CAREERJET_API_KEY is not set — no Bangladesh listings in the job feed; local boards stay as link-outs.");
   }
 
+  if (process.env.CAREERJET_API_KEY && !process.env.CAREERJET_REFERER) {
+    warnings.push("CAREERJET_REFERER is not set — Careerjet rejects calls whose Referer does not match the registered publisher site.");
+  }
+
   // ── AI ──
   if (!process.env.AI_API_KEY) {
     warnings.push("AI_API_KEY is not set — /api/ai/chat returns data:null and CV/roadmap generation falls back to heuristics.");

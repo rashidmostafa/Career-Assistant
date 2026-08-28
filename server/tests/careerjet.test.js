@@ -36,6 +36,15 @@ describe("v4 contract", () => {
     expect(src).toMatch(/Math\.min\(Math\.max\(pageSize, 1\), 100\)/);
   });
 
+  it("sends a Referer, which Careerjet requires and does not document with the other params", () => {
+    expect(src).toMatch(/Referer: REFERER/);
+    expect(src).toMatch(/CAREERJET_REFERER/);
+  });
+
+  it("names a rejected referrer rather than blaming the user context", () => {
+    expect(src).toMatch(/bad_referer/);
+  });
+
   it("handles LOCATIONS mode, where no search actually happened", () => {
     expect(src).toMatch(/type === "LOCATIONS"/);
     expect(src).toMatch(/ambiguous_location/);
