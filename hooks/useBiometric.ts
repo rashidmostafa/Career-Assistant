@@ -2,14 +2,13 @@
  * useBiometric — React hook for biometric enrollment, login, and re-auth.
  *
  * Features:
- *  - autoPromptOnMount: silently tries biometric login when the login screen mounts.
  *  - enroll: prompts the user, registers the credential with the server, and
  *    persists the hash locally.
  *  - login: full biometric login flow (prompt → hash → POST verify → save tokens).
  *  - reauthenticate: local biometric challenge only (no server round-trip).
  *  - disable: clears local credential and calls the server to remove the hash.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { BiometricService, type BiometricType } from "@/services/biometricService";
 import { AuthApiService, type AuthResponse } from "@/services/authApiService";
 import { SessionManager } from "@/services/sessionManager";
@@ -65,7 +64,6 @@ export interface UseBiometricReturn {
    *
    * @param onSuccess Called with the AuthResponse when login succeeds.
    */
-  autoPromptOnMount: (onSuccess: (result: AuthResponse) => void) => void;
 }
 
 export function useBiometric(): UseBiometricReturn {
@@ -77,7 +75,6 @@ export function useBiometric(): UseBiometricReturn {
   const [error,          setError]          = useState<string | null>(null);
 
   // Auto-prompt ref — avoids prompting twice if the component re-mounts quickly.
-  const autoPrompted = useRef(false);
 
   // ── Initialise state on mount ─────────────────────────────────────────────
   useEffect(() => {
@@ -197,25 +194,6 @@ export function useBiometric(): UseBiometricReturn {
     }
   }, []);
 
-  // ── autoPromptOnMount ─────────────────────────────────────────────────────
-  const autoPromptOnMount = useCallback(
-    (onSuccess: (result: AuthResponse) => void) => {
-      if (autoPrompted.current) return;
-      autoPrompted.current = true;
-
-      (async () => {
-        const enrolled = await BiometricService.isEnrolled();
-        if (!enrolled) return;
-        const { available: avail } = await BiometricService.getAvailability();
-        if (!avail) return;
-
-        const result = await login();
-        if (result) onSuccess(result);
-      })();
-    },
-    [login]
-  );
-
   return {
     available,
     biometricType,
@@ -227,6 +205,5 @@ export function useBiometric(): UseBiometricReturn {
     login,
     reauthenticate,
     disable,
-    autoPromptOnMount,
   };
 }

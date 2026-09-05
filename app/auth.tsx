@@ -165,21 +165,15 @@ export default function AuthScreen() {
     }
   }, [email, password, signIn, router, beginEmailVerification, resendVerification, startOtpCountdown]);
 
-  // ── Biometric auto-prompt on login screen mount ───────────────────────────────
-  React.useEffect(() => {
-    if (mode !== "login") return;
-    biometric.autoPromptOnMount(async () => {
-      // biometric.login() only saves tokens — AuthContext's `user` is still
-      // null until we actually load the profile, otherwise AuthGate sees no
-      // user and immediately routes back here even though tokens are valid.
-      await loadUserFromServer();
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      router.replace("/(tabs)");
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  // No automatic prompt on mount.
+  //
+  // The login screen used to raise the OS biometric sheet the moment it
+  // mounted. Any transient route back to /auth — including the moment before
+  // the profile finishes loading — therefore threw a fingerprint prompt over
+  // whatever the user was doing, unbidden and seemingly at random. Biometrics
+  // are now offered, never demanded: the sheet appears when the user taps the
+  // button below, the way a banking app behaves.
 
-  // ── Biometric login ──────────────────────────────────────────────────────────
   const handleBiometricLogin = useCallback(async () => {
     setError(null);
     setLoading(true);
@@ -347,7 +341,11 @@ export default function AuthScreen() {
 
               <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 {/* Biometric */}
-                {biometricAvailable && (
+                {/* Enrolment, not hardware: a phone with a fingerprint reader
+                    but no credential for this account cannot sign in this way,
+                    and offering it would fail on tap. Enrolment happens in
+                    Profile - Security, once, deliberately. */}
+                {biometricAvailable && biometric.isEnrolled && (
                   <View style={{ marginBottom: 4 }}>
                     <BiometricButton
                       type={biometricType}
