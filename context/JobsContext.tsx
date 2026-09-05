@@ -241,6 +241,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   }, [appliedKey, platformsKey]);
 
   const refreshJobs = useCallback(async () => {
+    // The bank is behind authentication, so without a user there is nothing to
+    // ask for — and asking anyway reports a session problem to someone who has
+    // no session by design.
+    if (!user) { setRawJobs([]); setJobSources([]); return; }
     setIsLoading(true);
     setError(null);
     try {
@@ -261,14 +265,25 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (e: any) {
       setUnreachable(true);
-      setError("Couldn't load jobs. Check your connection and pull down to try again.");
+      setError(e?.code === "SESSION_EXPIRED"
+        ? "Your session expired. Sign out and back in to load jobs."
+        : "Couldn't load jobs. Check your connection and pull down to try again.");
     } finally {
       setIsLoading(false);
     }
-  }, [targetRole]);
+  }, [targetRole, user]);
 
-  // Fetched on mount so what is on screen reflects what is live now.
-  useEffect(() => { void refreshJobs(); }, [refreshJobs]);
+  // Fetched once there is somebody to fetch for.
+  //
+  // JobsProvider is mounted outside AuthGate, so this effect runs on every cold
+  // start including one where nobody is signed in. Firing then sent an
+  // unauthenticated request that could only ever 401, which surfaced as
+  // "session expired while loading jobs" on a device that had simply never
+  // signed in — and on a fresh install, on every single launch.
+  useEffect(() => {
+    if (!user) return;
+    void refreshJobs();
+  }, [user, refreshJobs]);
 
   const jobs = useMemo(() => {
     const level = mapUserExperienceToJobLevel(user?.experienceLevel);

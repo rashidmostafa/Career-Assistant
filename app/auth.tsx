@@ -94,6 +94,8 @@ export default function AuthScreen() {
   const [showConfirmPw, setShowConfirmPw] = useState(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
+  // Only used when this device has several enrolled accounts.
+  const [userNumber, setUserNumber] = useState("");
   const [otpError, setOtpError] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendLoading, setResendLoading] = useState(false);
@@ -165,21 +167,15 @@ export default function AuthScreen() {
     }
   }, [email, password, signIn, router, beginEmailVerification, resendVerification, startOtpCountdown]);
 
-  // ── Biometric auto-prompt on login screen mount ───────────────────────────────
-  React.useEffect(() => {
-    if (mode !== "login") return;
-    biometric.autoPromptOnMount(async () => {
-      // biometric.login() only saves tokens — AuthContext's `user` is still
-      // null until we actually load the profile, otherwise AuthGate sees no
-      // user and immediately routes back here even though tokens are valid.
-      await loadUserFromServer();
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      router.replace("/(tabs)");
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  // No automatic prompt on mount.
+  //
+  // The login screen used to raise the OS biometric sheet the moment it
+  // mounted. Any transient route back to /auth — including the moment before
+  // the profile finishes loading — therefore threw a fingerprint prompt over
+  // whatever the user was doing, unbidden and seemingly at random. Biometrics
+  // are now offered, never demanded: the sheet appears when the user taps the
+  // button below, the way a banking app behaves.
 
-  // ── Biometric login ──────────────────────────────────────────────────────────
   const handleBiometricLogin = useCallback(async () => {
     setError(null);
     setLoading(true);
@@ -189,22 +185,28 @@ export default function AuthScreen() {
       // path, which meant any definitive server rejection (e.g. "Account is
       // locked") triggered a pointless second native biometric prompt before
       // showing the same error. One attempt, one prompt.
-      const result = await biometric.login();
-      if (result) {
+      const result = await biometric.login(userNumber || undefined);
+      if (result.ok) {
         // Populate AuthContext.user before navigating, or AuthGate bounces
         // straight back to /auth even though tokens are valid.
         await loadUserFromServer();
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         router.replace("/(tabs)");
-      } else {
-        setError(biometric.error ?? "Biometric authentication failed. Please sign in with your password.");
+      } else if (result.reason === "choose_account") {
+        // Being asked which account is not a failure. Showing "authentication
+        // failed" here told the user something had gone wrong while the app was
+        // simply waiting for their account number.
+        setError(null);
+      } else if (result.reason !== "cancelled") {
+        // A cancelled prompt is the user's own doing and needs no red text.
+        setError(result.message ?? "Fingerprint sign-in failed. Use your password instead.");
       }
     } catch (e: any) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, [biometric, loadUserFromServer, router]);
+  }, [biometric, userNumber, loadUserFromServer, router]);
 
   // ── Register ─────────────────────────────────────────────────────────────────
   const handleRegister = useCallback(async () => {
@@ -286,6 +288,15 @@ export default function AuthScreen() {
   // ─────────────────────────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────────────────────────
+  // Eight digits is the whole input, so it is also the submit signal — there is
+  // nothing further to confirm and a button would only add a step. Guarded on
+  // `loading` so a slow verify cannot be fired twice by a re-render.
+  React.useEffect(() => {
+    if (!biometric.needsUserNumber) return;
+    if (userNumber.length !== 8 || loading) return;
+    void handleBiometricLogin();
+  }, [userNumber, biometric.needsUserNumber, loading, handleBiometricLogin]);
+
   return (
     <KeyboardAvoidingView
       style={[styles.root, { backgroundColor: colors.background }]}
@@ -347,8 +358,57 @@ export default function AuthScreen() {
 
               <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 {/* Biometric */}
-                {biometricAvailable && (
+                {/* Enrolment, not hardware: a phone with a fingerprint reader
+                    but no credential for this account cannot sign in this way,
+                    and offering it would fail on tap. Enrolment happens in
+                    Profile - Security, once, deliberately. */}
+                {biometricAvailable && biometric.isEnrolled && (
                   <View style={{ marginBottom: 4 }}>
+                    {/* Asked only when the fingerprint alone cannot say which
+                        account is signing in, the way a bank asks for a customer
+                        number on a shared phone. */}
+                    {biometric.needsUserNumber && (
+                      <View style={{ marginBottom: 12 }}>
+                        <Text style={[styles.accountPrompt, { color: colors.foreground }]}>
+                          Several accounts use this device
+                        </Text>
+                        <Text style={[styles.accountHint, { color: colors.mutedForeground }]}>
+                          Enter your 8-digit account number. It's on your Profile.
+                        </Text>
+                        <View>
+                          <TextInput
+                            style={[styles.accountInput, {
+                              backgroundColor: colors.background,
+                              borderColor: userNumber.length === 8 ? colors.primary : colors.border,
+                              color: colors.foreground,
+                            }]}
+                            value={userNumber}
+                            onChangeText={(t) => setUserNumber(t.replace(/\D/g, "").slice(0, 8))}
+                            placeholder="1234 5678"
+                            placeholderTextColor={colors.mutedForeground}
+                            keyboardType="number-pad"
+                            maxLength={8}
+                            autoFocus
+                            editable={!loading}
+                            accessibilityLabel="Account number"
+                          />
+                          {/* Checked on the eighth digit, so this stands in for
+                              the button that would otherwise be here. */}
+                          {loading && userNumber.length === 8 && (
+                            <ActivityIndicator
+                              size="small"
+                              color={colors.primary}
+                              style={styles.accountSpinner}
+                            />
+                          )}
+                        </View>
+                        <Text style={[styles.accountHint, { color: colors.mutedForeground, marginTop: 7, marginBottom: 0 }]}>
+                          {userNumber.length === 8
+                            ? "Checking…"
+                            : `${8 - userNumber.length} more digit${8 - userNumber.length === 1 ? "" : "s"}`}
+                        </Text>
+                      </View>
+                    )}
                     <BiometricButton
                       type={biometricType}
                       onPress={handleBiometricLogin}
@@ -700,7 +760,7 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   scroll: { flexGrow: 1 },
   hero: { paddingBottom: 20, position: "relative", overflow: "hidden" },
-  heroGradient: { ...StyleSheet.absoluteFillObject },
+  heroGradient: { ...StyleSheet.absoluteFill },
   heroBlob: { position: "absolute", borderRadius: 999 },
   heroBlobOne: { width: 160, height: 160, right: -34, top: 4 },
   heroBlobTwo: { width: 110, height: 110, left: -30, top: 60 },
@@ -710,6 +770,13 @@ const styles = StyleSheet.create({
   // contain, so the mark is never cropped by the circle.
   logoMark: { width: 36, height: 36 },
   appName: { fontFamily: "Inter_700Bold", fontSize: 20, letterSpacing: -0.4 },
+  accountPrompt: { fontFamily: "Inter_700Bold", fontSize: 14, marginBottom: 3 },
+  accountHint: { fontFamily: "Inter_500Medium", fontSize: 12, lineHeight: 17, marginBottom: 9 },
+  accountInput: {
+    borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+    fontFamily: "Inter_600SemiBold", fontSize: 17, letterSpacing: 3, textAlign: "center",
+  },
+  accountSpinner: { position: "absolute", right: 14, top: 0, bottom: 0 },
   body: { paddingHorizontal: 24, paddingBottom: 40 },
   title: { fontFamily: "Inter_700Bold", fontSize: 26, letterSpacing: -0.6, marginBottom: 6, marginTop: 20 },
   subtitle: { fontFamily: "Inter_500Medium", fontSize: 14, lineHeight: 21, marginBottom: 20 },

@@ -46,6 +46,53 @@ function timeoutSignal(ms: number): { signal: AbortSignal; clear: () => void } {
 }
 
 /**
+ * The one refresh allowed to be in flight at a time.
+ *
+ * The server rotates refresh tokens: a successful refresh revokes the token it
+ * was given. Several contexts fetch the moment the app opens — the job feed,
+ * storage sync, push registration — so an expired access token produced several
+ * simultaneous 401s, each of which read the same refresh token from storage and
+ * spent it. Exactly one won. The rest were told SESSION_REVOKED, fell through,
+ * and reported the original "Access token expired", which is how a dead session
+ * surfaced as "careerjet request failed".
+ *
+ * Holding the promise means the losers now wait for the winner and retry with
+ * the token it obtained.
+ */
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    const refreshToken = await SessionManager.getRefreshToken();
+    if (!refreshToken) return null;
+    try {
+      const refreshed = await apiFetch<AuthTokens>(
+        "/api/auth/refresh",
+        // A refresh that hangs blocks every request waiting on it, so it gets
+        // its own budget rather than inheriting the caller's.
+        { method: "POST", body: JSON.stringify({ refreshToken }), timeoutMs: 30_000 },
+        false,
+        1,
+      );
+      await SessionManager.saveTokens(refreshed);
+      return refreshed.accessToken;
+    } catch {
+      // The refresh token itself is spent or revoked: the session is over and
+      // no amount of retrying changes that.
+      return null;
+    }
+  })();
+
+  try {
+    return await refreshInFlight;
+  } finally {
+    refreshInFlight = null;
+  }
+}
+
+/**
  * Shared HTTP entry point: attaches the access token, refreshes it once on a
  * 401, sends the device ID, and retries network failures with back-off.
  * Exported so the AI proxy and sync clients get all of that for free instead
@@ -80,31 +127,42 @@ export async function apiFetch<T = unknown>(
   try {
     const res = await fetch(url, { ...init, headers, signal });
 
-    // Token expired — try to refresh once, then retry
+    // Token expired — refresh once (shared across concurrent callers), then retry.
+    let failed = res;
     if (res.status === 401 && withAuth && _retryCount === 0) {
-      const refreshToken = await SessionManager.getRefreshToken();
-      if (refreshToken) {
+      const accessToken = await refreshAccessToken();
+      if (accessToken) {
+        headers["Authorization"] = `Bearer ${accessToken}`;
+        // A fresh deadline, for the reason given where `timeout` is created:
+        // the original signal has been counting since before the 401 and the
+        // refresh that followed it, and may already have fired.
+        const retryTimeout = init.timeoutMs ? timeoutSignal(init.timeoutMs) : null;
         try {
-          const refreshed = await apiFetch<AuthTokens>(
-            "/api/auth/refresh",
-            { method: "POST", body: JSON.stringify({ refreshToken }) },
-            false,
-            1,
-          );
-          await SessionManager.saveTokens(refreshed);
-          headers["Authorization"] = `Bearer ${refreshed.accessToken}`;
-          const retryRes = await fetch(url, { ...init, headers, signal });
+          const retryRes = await fetch(url, {
+            ...init, headers, signal: retryTimeout ? retryTimeout.signal : init.signal,
+          });
           if (retryRes.ok) return retryRes.json() as T;
-        } catch {
-          // Refresh failed — fall through to error
+          // Report what the retry said, not the stale 401. Blaming an expired
+          // token for, say, a 500 sends the user to re-authenticate over a
+          // problem that has nothing to do with their session.
+          failed = retryRes;
+        } finally {
+          retryTimeout?.clear();
         }
+      } else {
+        // Refresh is impossible, so the session really is over. Marked so a
+        // caller can prompt for sign-in instead of blaming its own feature.
+        const err = new Error("Your session has expired. Please sign in again.") as any;
+        err.status = 401;
+        err.code = "SESSION_EXPIRED";
+        throw err;
       }
     }
 
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      const err = new Error((body as any).message ?? `Request failed: ${res.status}`) as any;
-      err.status = res.status;
+    if (!failed.ok) {
+      const body = await failed.json().catch(() => ({}));
+      const err = new Error((body as any).message ?? `Request failed: ${failed.status}`) as any;
+      err.status = failed.status;
       err.code   = (body as any).code;
       // Present on EMAIL_NOT_VERIFIED so the caller can resume verification
       // without relying on locally stored pending state.

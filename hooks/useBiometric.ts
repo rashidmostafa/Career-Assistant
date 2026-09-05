@@ -2,17 +2,21 @@
  * useBiometric — React hook for biometric enrollment, login, and re-auth.
  *
  * Features:
- *  - autoPromptOnMount: silently tries biometric login when the login screen mounts.
  *  - enroll: prompts the user, registers the credential with the server, and
  *    persists the hash locally.
  *  - login: full biometric login flow (prompt → hash → POST verify → save tokens).
  *  - reauthenticate: local biometric challenge only (no server round-trip).
  *  - disable: clears local credential and calls the server to remove the hash.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { BiometricService, type BiometricType } from "@/services/biometricService";
 import { AuthApiService, type AuthResponse } from "@/services/authApiService";
 import { SessionManager } from "@/services/sessionManager";
+
+/** Why a fingerprint sign-in ended, carried with the result so it cannot lag. */
+export type LoginOutcome =
+  | { ok: true; response: AuthResponse }
+  | { ok: false; reason: "choose_account" | "unknown_number" | "none" | "cancelled" | "error"; message?: string };
 
 export interface UseBiometricReturn {
   /** Whether biometric hardware + enrollments are available. */
@@ -27,6 +31,8 @@ export interface UseBiometricReturn {
   loading: boolean;
   /** Last error message, if any. */
   error: string | null;
+  /** The device has several enrolments; ask for the account number. */
+  needsUserNumber: boolean;
 
   /**
    * Enrol biometric for the current user.
@@ -36,7 +42,7 @@ export interface UseBiometricReturn {
    * @param userId  The authenticated user's ID.
    * @returns true on success.
    */
-  enroll: (userId: string) => Promise<boolean>;
+  enroll: (userId: string, userNumber?: string) => Promise<boolean>;
 
   /**
    * Full biometric login: prompts the user, retrieves the stored credential,
@@ -44,7 +50,7 @@ export interface UseBiometricReturn {
    *
    * @returns AuthResponse on success, or null on failure/cancel.
    */
-  login: () => Promise<AuthResponse | null>;
+  login: (userNumber?: string) => Promise<LoginOutcome>;
 
   /**
    * Local-only re-authentication (no server call).
@@ -65,7 +71,6 @@ export interface UseBiometricReturn {
    *
    * @param onSuccess Called with the AuthResponse when login succeeds.
    */
-  autoPromptOnMount: (onSuccess: (result: AuthResponse) => void) => void;
 }
 
 export function useBiometric(): UseBiometricReturn {
@@ -73,11 +78,13 @@ export function useBiometric(): UseBiometricReturn {
   const [biometricType,  setBiometricType]  = useState<BiometricType>("None");
   const [biometricLabel, setBiometricLabel] = useState("Biometric");
   const [isEnrolled,     setIsEnrolled]     = useState(false);
+  // True when the device holds several enrolments and the account number is
+  // needed to say which one is signing in.
+  const [needsUserNumber, setNeedsUserNumber] = useState(false);
   const [loading,        setLoading]        = useState(false);
   const [error,          setError]          = useState<string | null>(null);
 
   // Auto-prompt ref — avoids prompting twice if the component re-mounts quickly.
-  const autoPrompted = useRef(false);
 
   // ── Initialise state on mount ─────────────────────────────────────────────
   useEffect(() => {
@@ -97,15 +104,15 @@ export function useBiometric(): UseBiometricReturn {
   }, []);
 
   // ── enroll ────────────────────────────────────────────────────────────────
-  const enroll = useCallback(async (userId: string): Promise<boolean> => {
+  const enroll = useCallback(async (userId: string, userNumber = ""): Promise<boolean> => {
     setError(null);
     setLoading(true);
     try {
       // Generate a unique credential ID for this device + user combination
       const credentialId = `${userId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const result = await BiometricService.saveCredential(credentialId, userId);
+      const result = await BiometricService.saveCredential(credentialId, userId, userNumber);
       if (!result) {
-        setError("Biometric confirmation was cancelled.");
+        setError("Fingerprint confirmation was cancelled.");
         return false;
       }
 
@@ -129,19 +136,38 @@ export function useBiometric(): UseBiometricReturn {
   }, []);
 
   // ── login ─────────────────────────────────────────────────────────────────
-  const login = useCallback(async (): Promise<AuthResponse | null> => {
+  /**
+   * Returns why it stopped, rather than a bare null.
+   *
+   * The caller used to infer the reason from `error`, which is React state and
+   * therefore still stale in the same tick — so "several accounts use this
+   * device", a question, was rendered as "Biometric authentication failed", a
+   * failure. The reason travels with the result now, so it cannot lag.
+   */
+  const login = useCallback(async (userNumber?: string): Promise<LoginOutcome> => {
     setError(null);
     setLoading(true);
     try {
-      const credential = await BiometricService.biometricLogin();
-      if (!credential) {
-        setError("Biometric sign-in cancelled or unavailable.");
-        return null;
+      const outcome = await BiometricService.biometricLogin({ userNumber });
+
+      if (outcome.status === "choose_account") {
+        // A question, not a failure: nothing is shown in red for this.
+        setNeedsUserNumber(true);
+        return { ok: false, reason: "choose_account" };
+      }
+      if (outcome.status !== "ok") {
+        const message =
+          outcome.status === "unknown_number" ? "No account with that number uses fingerprint sign-in on this device."
+          : outcome.status === "none"         ? "Fingerprint sign-in isn't set up on this device."
+          : "Fingerprint sign-in cancelled.";
+        setError(message);
+        return { ok: false, reason: outcome.status, message };
       }
 
+      setNeedsUserNumber(false);
       const response = await AuthApiService.verifyBiometric(
-        credential.userId,
-        credential.credentialIdHash
+        outcome.userId,
+        outcome.credentialIdHash
       );
 
       // Persist the new tokens so the rest of the app is immediately authenticated.
@@ -151,10 +177,11 @@ export function useBiometric(): UseBiometricReturn {
         expiresAt:    response.expiresAt,
       });
 
-      return response;
+      return { ok: true, response };
     } catch (e: any) {
-      setError(e?.message ?? "Biometric sign-in failed.");
-      return null;
+      const message = e?.message ?? "Fingerprint sign-in failed.";
+      setError(message);
+      return { ok: false, reason: "error", message };
     } finally {
       setLoading(false);
     }
@@ -197,36 +224,17 @@ export function useBiometric(): UseBiometricReturn {
     }
   }, []);
 
-  // ── autoPromptOnMount ─────────────────────────────────────────────────────
-  const autoPromptOnMount = useCallback(
-    (onSuccess: (result: AuthResponse) => void) => {
-      if (autoPrompted.current) return;
-      autoPrompted.current = true;
-
-      (async () => {
-        const enrolled = await BiometricService.isEnrolled();
-        if (!enrolled) return;
-        const { available: avail } = await BiometricService.getAvailability();
-        if (!avail) return;
-
-        const result = await login();
-        if (result) onSuccess(result);
-      })();
-    },
-    [login]
-  );
-
   return {
     available,
     biometricType,
     biometricLabel,
     isEnrolled,
+    needsUserNumber,
     loading,
     error,
     enroll,
     login,
     reauthenticate,
     disable,
-    autoPromptOnMount,
   };
 }

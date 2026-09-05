@@ -43,16 +43,26 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "career-assistant" }
+            {
+              "scheme": "career-assistant"
+            }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         },
         {
           "action": "VIEW",
           "data": [
-            { "scheme": "exp" }
+            {
+              "scheme": "exp"
+            }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -78,7 +88,11 @@
           "color": "#0768f8",
           "defaultChannel": "security-reminders"
         }
-      ]
+      ],
+      "expo-image",
+      "expo-sharing",
+      "expo-splash-screen",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true

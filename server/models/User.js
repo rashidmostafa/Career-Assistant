@@ -6,6 +6,7 @@
  *           social OAuth (Google), push notifications.
  */
 const mongoose = require("mongoose");
+const crypto = require("crypto");
 const bcrypt   = require("bcryptjs");
 
 const SecurityQuestionSchema = new mongoose.Schema({
@@ -17,6 +18,27 @@ const UserSchema = new mongoose.Schema({
   // ── Core ──────────────────────────────────────────────────────────────────
   name:  { type: String, required: true, trim: true, maxlength: 100 },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
+
+  /**
+   * The account's public number, the way a bank gives you a customer number.
+   *
+   * Exists because a fingerprint cannot name an account. The OS reports only
+   * that someone authorised on this device, so when more than one account has
+   * enrolled here the app has to ask which one — and asking for an email would
+   * mean typing an address on a keypad, while asking for the Mongo _id would
+   * mean reading out 24 hex characters. Eight digits can be read aloud, typed
+   * on a numeric keypad, and written on paper.
+   *
+   * Sparse so accounts created before this field existed remain valid until
+   * they are backfilled; unique so two accounts can never share one.
+   */
+  userNumber: {
+    type: String,
+    unique: true,
+    sparse: true,
+    index: true,
+    match: [/^\d{8}$/, "userNumber must be 8 digits."],
+  },
   phone: { type: String, trim: true },
   passwordHash: { type: String, required: true },
 
@@ -63,6 +85,18 @@ const UserSchema = new mongoose.Schema({
   biometricEnabled:      { type: Boolean, default: false },
   biometricTokenHash:    { type: String, select: false },  // SHA-256 of device credential ID
   biometricRegisteredAt: { type: Date },
+  /**
+   * The device whose biometric unlocks this account.
+   *
+   * Biometric sign-in starts from the device, not from a username: the phone
+   * says "someone authorised" and the app must decide whose account that opens.
+   * If two accounts enrolled on one device that question has no answer, so the
+   * device is recorded and a second account is refused.
+   *
+   * The OS never reveals which finger was used — authenticateAsync returns only
+   * success — so the device is the finest identity available to us.
+   */
+  biometricDeviceId:     { type: String, index: true },
 
   // ── Security questions ────────────────────────────────────────────────────
   securityQuestions: { type: [SecurityQuestionSchema], select: false },
@@ -98,6 +132,32 @@ UserSchema.index({ "trustedDevices.deviceId": 1 });
 UserSchema.index({ deletionScheduledAt: 1 }, { sparse: true });
 
 // ── Password hashing ──────────────────────────────────────────────────────────
+/**
+ * An unused 8-digit number.
+ *
+ * Checked against the collection rather than trusted blindly: the unique index
+ * is the real guarantee, but colliding at save time would fail a registration
+ * the user cannot retry meaningfully, so a few cheap lookups avoid it.
+ */
+UserSchema.statics.generateUserNumber = async function () {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    // First digit non-zero, so it always renders as eight characters.
+    const n = String(crypto.randomInt(10_000_000, 100_000_000));
+    if (!(await this.exists({ userNumber: n }))) return n;
+  }
+  throw new Error("Could not allocate a user number.");
+};
+
+UserSchema.pre("save", async function (next) {
+  if (this.userNumber) return next();
+  try {
+    this.userNumber = await this.constructor.generateUserNumber();
+    next();
+  } catch (e) {
+    next(e);
+  }
+});
+
 UserSchema.pre("save", async function (next) {
   if (!this.isModified("passwordHash")) return next();
   // passwordHash field receives plaintext password on set, then gets hashed
