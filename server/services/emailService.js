@@ -82,6 +82,25 @@ function buildMimeMessage({ from, to, subject, text, html }) {
     .replace(/=+$/, "");
 }
 
+/**
+ * Which delivery path is configured, decided the same way getTransporter picks.
+ *
+ * Reported by /health because a misconfigured mailer is otherwise invisible:
+ * sendOtp swallows its errors, so registration succeeds, the code is stored,
+ * no mail is sent, and the app tells the user to check an inbox that will stay
+ * empty. Names only — never a key.
+ */
+function emailProvider() {
+  if (process.env.GMAIL_REFRESH_TOKEN && process.env.GOOGLE_CLIENT_ID) return "gmail-api";
+  if (process.env.BREVO_API_KEY)    return "brevo";
+  if (process.env.SENDGRID_API_KEY) return "sendgrid";
+  if (process.env.SMTP_HOST)        return "smtp";
+  return "none";
+}
+
+/** The last delivery attempt, so a failure is visible after the fact. */
+let lastSend = { at: null, ok: null, reason: null };
+
 let transporter = null;
 
 function getTransporter() {
@@ -181,7 +200,28 @@ function getTransporter() {
 // Must be an address verified in the provider's dashboard, or the send is
 // rejected. Brevo calls this a "verified sender"; a plain Gmail address works
 // and needs no domain of your own.
-const FROM = process.env.GMAIL_FROM_EMAIL ?? process.env.BREVO_FROM_EMAIL ?? process.env.SENDGRID_FROM_EMAIL ?? process.env.SMTP_USER ?? "noreply@careerassistant.app";
+/**
+ * The sender address, first non-empty wins.
+ *
+ * `||`, not `??`. An unused provider is usually left in the environment as an
+ * empty value rather than removed, and `??` only falls through on null or
+ * undefined — so `SENDGRID_FROM_EMAIL=` stopped the chain dead and every
+ * message went out with an empty From, which mail servers reject. The failure
+ * was invisible because sendOtp catches its own errors: registration succeeded,
+ * the code was stored, and the user waited on an email that was never accepted.
+ */
+const FROM = firstNonEmpty(
+  process.env.GMAIL_FROM_EMAIL,
+  process.env.BREVO_FROM_EMAIL,
+  process.env.SENDGRID_FROM_EMAIL,
+  process.env.SMTP_USER,
+  "noreply@careerassistant.app",
+);
+
+function firstNonEmpty(...values) {
+  for (const v of values) if (typeof v === "string" && v.trim() !== "") return v.trim();
+  return "";
+}
 const APP_NAME = "Career Assistant";
 
 const EmailService = {
@@ -227,10 +267,30 @@ const EmailService = {
 
     try {
       await getTransporter().sendMail({ from: `"${APP_NAME}" <${FROM}>`, to, subject, text, html });
+      lastSend = { at: new Date().toISOString(), ok: true, reason: null };
+      return { sent: true };
     } catch (err) {
+      // Still not thrown: a failed email must not fail a registration that
+      // otherwise succeeded, and the code is stored either way. But the outcome
+      // is returned now, so the caller can tell the user their code is not
+      // coming instead of leaving them watching an empty inbox.
       console.error("[EmailService] sendOtp error:", err.message);
-      // Do not propagate — log and continue; the console fallback ensures dev flow works
+      lastSend = { at: new Date().toISOString(), ok: false, reason: err.message?.slice(0, 200) ?? "unknown" };
+      return { sent: false, reason: err.message?.slice(0, 200) ?? "unknown" };
     }
+  },
+
+  /** Configuration and last-attempt status. Contains no secrets. */
+  status() {
+    const provider = emailProvider();
+    return {
+      provider,
+      // "smtp" on a host that blocks outbound SMTP ports cannot deliver at all,
+      // which is the trap this field exists to make obvious.
+      configured: provider !== "none",
+      from: FROM,
+      lastSend,
+    };
   },
 
   /**

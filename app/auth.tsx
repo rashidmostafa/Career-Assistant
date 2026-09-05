@@ -6,7 +6,7 @@
  */
 import {
   AlertCircle, ArrowLeft, Eye, EyeOff,
-  Lock, Mail, Phone, User as UserIcon,
+  Fingerprint, Lock, Mail, Phone, User as UserIcon,
 } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
@@ -418,6 +418,20 @@ export default function AuthScreen() {
                   </View>
                 )}
 
+                {/* The button is hidden until this device holds a credential,
+                    because tapping it otherwise could only fail. Its absence on
+                    a phone that plainly has a fingerprint reader reads as a
+                    broken app, so the reason is stated rather than left to be
+                    guessed at. */}
+                {biometricAvailable && !biometric.isEnrolled && (
+                  <View style={[styles.bioHint, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
+                    <Fingerprint size={15} color={colors.mutedForeground} />
+                    <Text style={[styles.bioHintText, { color: colors.mutedForeground }]}>
+                      Fingerprint sign-in isn't set up on this device yet. Sign in below, then turn it on in Profile → Security & Privacy.
+                    </Text>
+                  </View>
+                )}
+
                 <Field
                   icon={<Mail size={16} color={colors.primary} />}
                   placeholder="Email address"
@@ -777,6 +791,11 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold", fontSize: 17, letterSpacing: 3, textAlign: "center",
   },
   accountSpinner: { position: "absolute", right: 14, top: 0, bottom: 0 },
+  bioHint: {
+    flexDirection: "row", alignItems: "flex-start", gap: 9,
+    padding: 11, borderRadius: 12, borderWidth: 1, marginBottom: 14,
+  },
+  bioHintText: { flex: 1, fontFamily: "Inter_500Medium", fontSize: 11.5, lineHeight: 16 },
   body: { paddingHorizontal: 24, paddingBottom: 40 },
   title: { fontFamily: "Inter_700Bold", fontSize: 26, letterSpacing: -0.6, marginBottom: 6, marginTop: 20 },
   subtitle: { fontFamily: "Inter_500Medium", fontSize: 14, lineHeight: 21, marginBottom: 20 },

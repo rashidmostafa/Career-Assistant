@@ -30,6 +30,8 @@ jest.mock("../server/services/emailService", () => ({
   sendOtp:            jest.fn().mockResolvedValue(undefined),
   sendSessionWarning: jest.fn().mockResolvedValue(undefined),
   sendRecoveryEmail:  jest.fn().mockResolvedValue(undefined),
+  // /health reads this; a mock without it made the endpoint 500.
+  status: () => ({ provider: "none", configured: false, from: "test@local", lastSend: { at: null, ok: null, reason: null } }),
 }));
 jest.mock("../server/services/pushNotificationService", () => ({
   send:                  jest.fn().mockResolvedValue(undefined),

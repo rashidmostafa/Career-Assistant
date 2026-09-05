@@ -150,6 +150,17 @@ app.get("/health", (_req, res) => {
     uptime:    process.uptime(),
     timestamp: new Date().toISOString(),
     version:   require("./package.json").version ?? "1.0.0",
+    // Names the mail path and its last outcome. A mailer that cannot deliver is
+    // otherwise silent: OTP failures are caught and logged, so registration
+    // succeeds and the user waits on an email that was never sent.
+    // Wrapped: a health check that can throw is worse than one that omits a
+    // detail. Render restarts an instance whose health check fails, so a fault
+    // in this line would cycle the process — the very loop the note above
+    // exists to avoid.
+    email:     (() => {
+      try { return require("./services/emailService").status(); }
+      catch (e) { return { provider: "unknown", configured: null, error: e?.message?.slice(0, 120) }; }
+    })(),
   });
 });
 

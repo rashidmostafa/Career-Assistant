@@ -238,3 +238,32 @@ describe("the security screen explains what it is turning on", () => {
     expect(security).toMatch(/password keeps working/);
   });
 });
+
+describe("the sign-in screen explains a missing fingerprint button", () => {
+  const screen = read("app/auth.tsx");
+
+  it("shows a hint when the phone has a reader but no enrolment", () => {
+    // The button is hidden until this device holds a credential, because
+    // tapping it otherwise could only fail. Its absence on a phone that plainly
+    // has a fingerprint reader reads as a broken app.
+    expect(screen).toMatch(/biometricAvailable && !biometric\.isEnrolled/);
+    expect(screen).toMatch(/isn't set up on this device yet/);
+  });
+
+  it("says where to turn it on", () => {
+    expect(screen).toMatch(/Profile → Security & Privacy/);
+  });
+
+  it("shows the hint and the button as alternatives, never both", () => {
+    expect(screen).toMatch(/biometricAvailable && biometric\.isEnrolled/);
+    expect(screen).toMatch(/biometricAvailable && !biometric\.isEnrolled/);
+  });
+
+  it("shows neither on a phone with no reader at all", () => {
+    // Both branches are gated on biometricAvailable, so a device without the
+    // hardware is told nothing about a feature it could never use.
+    const conditions = screen.match(/biometricAvailable &&[^\n]*/g) ?? [];
+    expect(conditions.length).toBe(2);
+    for (const c of conditions) expect(c.startsWith("biometricAvailable &&")).toBe(true);
+  });
+});
