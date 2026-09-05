@@ -798,7 +798,9 @@ describe("Biometric — BiometricService.biometricLogin", () => {
 });
 
 describe("Biometric — getBiometricLabel", () => {
-  test("says 'Biometrics' for a face sensor, not the hardware's name", async () => {
+  test("treats a face-only device as unsupported", async () => {
+    // Fingerprint only: a face is shareable by a twin and defeatable by a
+    // photograph on weaker sensors, and this app binds an account to it.
     const LocalAuth = require("expo-local-authentication");
     LocalAuth.hasHardwareAsync.mockResolvedValueOnce(true);
     LocalAuth.isEnrolledAsync.mockResolvedValueOnce(true);
@@ -806,8 +808,21 @@ describe("Biometric — getBiometricLabel", () => {
       LocalAuth.AuthenticationType.FACIAL_RECOGNITION,
     ]);
     const { BiometricService } = require("../services/biometricService");
-    const label = await BiometricService.getBiometricLabel();
-    expect(label).toBe("Biometrics");
+    expect(await BiometricService.getAvailability()).toEqual({ available: false, type: "None" });
+  });
+
+  test("accepts a device that also offers face, as long as it has a reader", async () => {
+    // The OS picks which enrolled modality its prompt shows and gives no way to
+    // demand one, so requiring a reader is as far as this can go.
+    const LocalAuth = require("expo-local-authentication");
+    LocalAuth.hasHardwareAsync.mockResolvedValueOnce(true);
+    LocalAuth.isEnrolledAsync.mockResolvedValueOnce(true);
+    LocalAuth.supportedAuthenticationTypesAsync.mockResolvedValueOnce([
+      LocalAuth.AuthenticationType.FACIAL_RECOGNITION,
+      LocalAuth.AuthenticationType.FINGERPRINT,
+    ]);
+    const { BiometricService } = require("../services/biometricService");
+    expect((await BiometricService.getAvailability()).available).toBe(true);
   });
 
   test("says 'Biometrics' for a fingerprint sensor too", async () => {

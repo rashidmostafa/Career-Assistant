@@ -70,3 +70,51 @@ describe("enrolment lives in Profile - Security", () => {
     expect(read("app/(tabs)/profile.tsx")).toMatch(/router\.push\("\/auth-security"\)/);
   });
 });
+
+describe("fingerprint only", () => {
+  const service = read("services/biometricService.ts");
+
+  it("requires a fingerprint reader, not merely any biometric", () => {
+    expect(service).toMatch(/AuthenticationType\.FINGERPRINT/);
+    expect(service).toMatch(/return \{ available: false, type: "None" \};/);
+  });
+
+  it("refuses the device passcode as a stand-in", () => {
+    // A PIN may have been shared; accepting it would let it substitute for the
+    // fingerprint the account is bound to, which is the point of the binding.
+    expect(service).toMatch(/disableDeviceFallback: true/);
+    expect(service).not.toMatch(/disableDeviceFallback: false/);
+  });
+
+  it("does not still offer a passcode in its copy", () => {
+    expect(service).not.toMatch(/Use Passcode/);
+    expect(service).not.toMatch(/Use your passcode/);
+  });
+
+  it("asks for a fingerprint by name in the prompts", () => {
+    expect(service).toMatch(/Sign in with your fingerprint/);
+    expect(service).toMatch(/Confirm your fingerprint/);
+  });
+});
+
+describe("one account per device, locally", () => {
+  const service = read("services/biometricService.ts");
+  const hook = read("hooks/useBiometric.ts");
+
+  it("refuses to enrol over another account's binding", () => {
+    const fn = service.slice(service.indexOf("async saveCredential"));
+    expect(fn.slice(0, 900)).toMatch(/existingUser !== userId/);
+  });
+
+  it("checks before prompting, so the user is not asked for a finger it will reject", () => {
+    const fn = service.slice(service.indexOf("async saveCredential"), service.indexOf("const hash = await sha256"));
+    expect(fn.indexOf("existingUser !== userId")).toBeLessThan(fn.indexOf("this.authenticate("));
+  });
+
+  it("tells the user a refusal apart from a cancellation", () => {
+    // The two are indistinguishable from outside saveCredential, and calling a
+    // refusal a cancellation would send the user round the same loop forever.
+    expect(hook).toMatch(/Another account on this device already uses fingerprint/);
+    expect(service).toMatch(/async enrolledUserId\(\)/);
+  });
+});

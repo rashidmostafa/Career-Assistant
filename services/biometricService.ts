@@ -70,8 +70,22 @@ export const BiometricService = {
       if (!compatible) return { available: false, type: "None" };
       const enrolled = await LocalAuthentication.isEnrolledAsync();
       if (!enrolled) return { available: false, type: "None" };
-      // Enrolled hardware is all that matters; the OS picks the sensor and
-      // draws its own prompt, so which one it is changes nothing here.
+
+      // Fingerprint only.
+      //
+      // A face can be shared by a twin and defeated by a photograph on weaker
+      // sensors, and this app binds an account to a biometric, so the weaker
+      // modality is not offered. A device without a fingerprint reader is
+      // reported unavailable and falls back to password sign-in.
+      //
+      // Honest about the limit: the OS chooses which enrolled modality its own
+      // prompt presents, and exposes no way to demand one. So this guarantees
+      // the device HAS a fingerprint reader, not that a face was never used on
+      // a phone offering both. That boundary belongs to the platform.
+      const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
+      if (!types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT)) {
+        return { available: false, type: "None" };
+      }
       return { available: true, type: "Biometrics" };
     } catch {
       return { available: false, type: "None" };
@@ -96,9 +110,12 @@ export const BiometricService = {
 
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage:       prompt,
-        fallbackLabel:       "Use Passcode",
-        disableDeviceFallback: false,
         cancelLabel:         "Cancel",
+        // No passcode fallback. The device PIN is something the account owner
+        // may have shared, and accepting it here would let it stand in for the
+        // fingerprint this account is bound to — which is the whole point of
+        // the binding. Someone without the finger uses their password instead.
+        disableDeviceFallback: true,
       });
 
       if (result.success) return { success: true };
@@ -108,7 +125,7 @@ export const BiometricService = {
           result.error === "user_cancel"
             ? "Authentication cancelled."
             : result.error === "lockout"
-            ? "Too many failed attempts. Use your passcode."
+            ? "Too many failed attempts. Sign in with your password instead."
             : "Authentication failed.",
       };
     } catch (e: any) {
@@ -120,8 +137,32 @@ export const BiometricService = {
    * Save a credential ID + userId pair to SecureStore after a biometric check.
    * Returns the SHA-256 hash of the credential ID (to send to the server).
    */
+  /**
+   * Which account, if any, currently owns fingerprint sign-in on this device.
+   *
+   * Lets a caller tell a refusal ("someone else has this device") apart from a
+   * cancelled prompt, which otherwise look identical from outside.
+   */
+  async enrolledUserId(): Promise<string | null> {
+    if ((await AsyncStorage.getItem(BIOMETRIC_ENABLED_KEY)) !== "true") return null;
+    return secureGet(USER_ID_KEY);
+  },
+
   async saveCredential(credentialId: string, userId: string): Promise<{ hash: string } | null> {
-    const auth = await this.authenticate("Confirm your identity to enable biometric sign-in");
+    // One account per device, checked before the prompt.
+    //
+    // This used to overwrite whatever was here, so enrolling a second account
+    // silently took the first one's place: the button still said "Sign in with
+    // biometrics" and quietly opened the wrong account. The fingerprint itself
+    // cannot distinguish them — the OS reports only that someone authorised —
+    // so the device is the finest identity available, and it holds one account.
+    const existingUser = await secureGet(USER_ID_KEY);
+    const alreadyOn = (await AsyncStorage.getItem(BIOMETRIC_ENABLED_KEY)) === "true";
+    if (alreadyOn && existingUser && existingUser !== userId) {
+      return null;
+    }
+
+    const auth = await this.authenticate("Confirm your fingerprint to enable biometric sign-in");
     if (!auth.success) return null;
 
     await secureSet(CREDENTIAL_ID_KEY,    credentialId);
@@ -153,7 +194,7 @@ export const BiometricService = {
     const enabledRaw = await AsyncStorage.getItem(BIOMETRIC_ENABLED_KEY);
     if (enabledRaw !== "true") return null;
 
-    const auth = await this.authenticate("Sign in with biometrics");
+    const auth = await this.authenticate("Sign in with your fingerprint");
     if (!auth.success) return null;
 
     const credentialId = await secureGet(CREDENTIAL_ID_KEY);
@@ -197,7 +238,7 @@ export const BiometricService = {
   async retrieveToken(): Promise<string | null> {
     const enabledRaw = await AsyncStorage.getItem(BIOMETRIC_ENABLED_KEY);
     if (enabledRaw !== "true") return null;
-    const auth = await this.authenticate("Sign in with biometrics");
+    const auth = await this.authenticate("Sign in with your fingerprint");
     if (!auth.success) return null;
     return secureGet(CREDENTIAL_ID_KEY);
   },

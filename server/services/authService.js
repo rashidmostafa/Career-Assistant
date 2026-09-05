@@ -15,6 +15,20 @@ const Session   = require("../models/Session");
 const AuditLog  = require("../models/AuditLog");
 const { issueAccessToken, issueRefreshToken, verifyRefreshToken } = require("../middleware/authMiddleware");
 const { blockIP } = require("../middleware/rateLimiter");
+
+/**
+ * "rashid@gmail.com" -> "r*****@gmail.com".
+ *
+ * Enough for the device's owner to recognise their own other account, without
+ * printing a full address to whoever is holding the phone.
+ */
+function maskEmail(email) {
+  const [name, domain] = String(email ?? "").split("@");
+  if (!domain) return "another account";
+  const head = name.slice(0, 1);
+  return `${head}${"*".repeat(Math.max(name.length - 1, 1))}@${domain}`;
+}
+
 const EmailService = require("./emailService");
 const dns = require("dns").promises;
 
@@ -690,10 +704,33 @@ const AuthService = {
     if (!credentialIdHash || typeof credentialIdHash !== "string") {
       throw Object.assign(new Error("credentialIdHash is required."), { status: 400 });
     }
+
+    const deviceId = req?.headers?.["x-device-id"];
+    if (!deviceId) {
+      throw Object.assign(new Error("Device could not be identified."), { status: 400 });
+    }
+
+    // One account per device. The prompt proves someone authorised on this
+    // phone; it cannot say who. With two accounts enrolled here, a tap on
+    // "Sign in with biometrics" would have no defensible answer, so the second
+    // enrolment is refused rather than silently taking the first one's place.
+    const taken = await User.findOne({
+      biometricDeviceId: deviceId,
+      biometricEnabled:  true,
+      _id:               { $ne: userId },
+    }).select("email");
+    if (taken) {
+      throw Object.assign(
+        new Error(`Biometric sign-in on this device is already set up for ${maskEmail(taken.email)}. Turn it off there first.`),
+        { status: 409, code: "BIOMETRIC_DEVICE_TAKEN" },
+      );
+    }
+
     const hash = this.hashBiometricToken(credentialIdHash);
     await User.findByIdAndUpdate(userId, {
       biometricTokenHash:    hash,
       biometricEnabled:      true,
+      biometricDeviceId:     deviceId,
       biometricRegisteredAt: new Date(),
     });
     await audit("biometric_register", userId, req);
@@ -737,6 +774,9 @@ const AuthService = {
     await User.findByIdAndUpdate(userId, {
       biometricTokenHash:    undefined,
       biometricEnabled:      false,
+      // Releases the device so another account can enrol here. Without this the
+      // refusal above would be permanent for everyone else on this phone.
+      biometricDeviceId:     undefined,
       biometricRegisteredAt: undefined,
     });
     await audit("biometric_disable", userId, req);

@@ -102,7 +102,12 @@ export function useBiometric(): UseBiometricReturn {
       const credentialId = `${userId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const result = await BiometricService.saveCredential(credentialId, userId);
       if (!result) {
-        setError("Biometric confirmation was cancelled.");
+        // saveCredential also refuses when another account already holds this
+        // device, which is not a cancellation and must not read as one.
+        const holder = await BiometricService.enrolledUserId();
+        setError(holder && holder !== userId
+          ? "Another account on this device already uses fingerprint sign-in. Turn it off there first."
+          : "Fingerprint confirmation was cancelled.");
         return false;
       }
 

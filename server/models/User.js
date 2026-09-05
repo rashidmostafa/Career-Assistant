@@ -63,6 +63,18 @@ const UserSchema = new mongoose.Schema({
   biometricEnabled:      { type: Boolean, default: false },
   biometricTokenHash:    { type: String, select: false },  // SHA-256 of device credential ID
   biometricRegisteredAt: { type: Date },
+  /**
+   * The device whose biometric unlocks this account.
+   *
+   * Biometric sign-in starts from the device, not from a username: the phone
+   * says "someone authorised" and the app must decide whose account that opens.
+   * If two accounts enrolled on one device that question has no answer, so the
+   * device is recorded and a second account is refused.
+   *
+   * The OS never reveals which finger was used — authenticateAsync returns only
+   * success — so the device is the finest identity available to us.
+   */
+  biometricDeviceId:     { type: String, index: true },
 
   // ── Security questions ────────────────────────────────────────────────────
   securityQuestions: { type: [SecurityQuestionSchema], select: false },
