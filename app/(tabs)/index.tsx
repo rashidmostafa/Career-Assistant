@@ -204,7 +204,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   hero: { paddingBottom: 24, borderBottomWidth: StyleSheet.hairlineWidth, marginBottom: 0 },
-  heroGradient: { ...StyleSheet.absoluteFillObject },
+  heroGradient: { ...StyleSheet.absoluteFill },
   heroBlob: { position: "absolute", borderRadius: 999 },
   heroBlobOne: { width: 180, height: 180, right: -36, top: 20 },
   heroBlobTwo: { width: 120, height: 120, left: -34, top: 76 },
@@ -227,7 +227,7 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 },
   sectionTitle: { fontSize: 17, fontFamily: "Inter_700Bold", letterSpacing: -0.35 },
   actionCard: { flexDirection: "row", alignItems: "center", gap: 16, borderRadius: 20, padding: 18, borderWidth: 1, marginBottom: 10, overflow: "hidden", position: "relative" },
-  actionCardGlow: { ...StyleSheet.absoluteFillObject },
+  actionCardGlow: { ...StyleSheet.absoluteFill },
   actionAccent: { position: "absolute", left: 0, top: 12, bottom: 12, width: 4, borderTopRightRadius: 4, borderBottomRightRadius: 4 },
   actionIconWrap: { width: 48, height: 48, borderRadius: 16, alignItems: "center", justifyContent: "center", borderWidth: 1 },
   actionText: { flex: 1 },

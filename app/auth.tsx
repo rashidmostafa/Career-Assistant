@@ -700,7 +700,7 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   scroll: { flexGrow: 1 },
   hero: { paddingBottom: 20, position: "relative", overflow: "hidden" },
-  heroGradient: { ...StyleSheet.absoluteFillObject },
+  heroGradient: { ...StyleSheet.absoluteFill },
   heroBlob: { position: "absolute", borderRadius: 999 },
   heroBlobOne: { width: 160, height: 160, right: -34, top: 4 },
   heroBlobTwo: { width: 110, height: 110, left: -30, top: 60 },

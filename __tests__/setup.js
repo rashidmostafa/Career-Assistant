@@ -21,6 +21,22 @@ jest.mock("expo-secure-store", () => ({
   WHEN_UNLOCKED_THIS_DEVICE_ONLY: "WHEN_UNLOCKED_THIS_DEVICE_ONLY",
 }));
 
+// expo-crypto
+//
+// Mocked from SDK 57 onwards: expo-crypto now imports the `expo` package root,
+// whose app-entry side effect throws AppEntryNotFound under Jest. The digest is
+// Node's real SHA-256 rather than a fixed string, so tests that rely on the same
+// input hashing the same way — and different inputs differing — still mean
+// something.
+jest.mock("expo-crypto", () => ({
+  digestStringAsync: jest.fn(async (_algorithm, data) =>
+    require("crypto").createHash("sha256").update(String(data)).digest("hex"),
+  ),
+  CryptoDigestAlgorithm: { SHA256: "SHA-256", SHA512: "SHA-512" },
+  randomUUID: jest.fn(() => require("crypto").randomUUID()),
+  getRandomBytesAsync: jest.fn(async (n) => new Uint8Array(require("crypto").randomBytes(n))),
+}));
+
 // expo-local-authentication
 jest.mock("expo-local-authentication", () => ({
   hasHardwareAsync: jest.fn().mockResolvedValue(true),

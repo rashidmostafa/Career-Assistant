@@ -586,7 +586,7 @@ function Header({ topPad, accent, colors, title, subtitle }: any) {
         colors={[accent + "1f", colors.background, colors.card]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFillObject as any}
+        style={StyleSheet.absoluteFill}
       />
       <View style={[styles.blob, { backgroundColor: accent + "22", right: -34, top: 10 }]} />
       <Text style={[styles.headerTitle, { color: colors.foreground }]}>{title}</Text>

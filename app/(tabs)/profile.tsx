@@ -114,7 +114,7 @@ function PickerModal({ visible, title, options, selected, onSelect, onClose, col
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, justifyContent: "flex-end" }}>
-        <TouchableOpacity style={{ ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.4)" }} onPress={onClose} />
+        <TouchableOpacity style={{ ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.4)" }} onPress={onClose} />
         <View style={{ backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 12, maxHeight: "80%" }}>
           <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: "center", marginBottom: 16 }} />
           <Text style={{ fontSize: 16, fontFamily: "Inter_700Bold", color: colors.foreground, paddingHorizontal: 20, marginBottom: 12 }}>{title}</Text>
@@ -490,7 +490,7 @@ const styles = StyleSheet.create({
   roleActive: { fontFamily: "Inter_600SemiBold", fontSize: 12 },
   container: { flex: 1 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth, position: "relative", overflow: "hidden" },
-  headerGradient: { ...StyleSheet.absoluteFillObject },
+  headerGradient: { ...StyleSheet.absoluteFill },
   headerBlob: { position: "absolute", borderRadius: 999 },
   headerBlobOne: { width: 140, height: 140, right: -30, top: 10 },
   headerBlobTwo: { width: 96, height: 96, left: -20, top: 54 },
