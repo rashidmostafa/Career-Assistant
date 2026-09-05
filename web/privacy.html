@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Career Assistant</title>
+<meta name="description" content="What Career Assistant collects, why, who it is shared with, and how to get it back or delete it.">
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#12151d; --line:#232936; --fg:#e8ecf3;
+    --muted:#98a2b3; --accent:#4f8cff;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#ffffff; --panel:#f7f9fc; --line:#e3e8ef; --fg:#101828; --muted:#5a6478; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+       background:var(--bg);color:var(--fg);line-height:1.65;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:820px;margin:0 auto;padding:0 24px}
+  header{padding:64px 0 32px;border-bottom:1px solid var(--line)}
+  .logo{font-size:14px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+  h1{font-size:clamp(28px,4.5vw,38px);line-height:1.2;margin:14px 0 10px;letter-spacing:-.02em}
+  .updated{color:var(--muted);font-size:14px}
+  section{padding:30px 0;border-bottom:1px solid var(--line)}
+  h2{font-size:19px;margin:0 0 12px;letter-spacing:-.01em}
+  p,li{color:var(--fg);font-size:15.5px}
+  .muted{color:var(--muted)}
+  ul{padding-left:20px;margin:10px 0}
+  li{margin-bottom:7px}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.05em}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin:14px 0}
+  footer{padding:32px 0 64px;color:var(--muted);font-size:14px}
+  a{color:var(--accent)}
+  code{background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:13.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo">Career Assistant</div>
+    <h1>Privacy Policy</h1>
+    <div class="updated">Last updated: 5 September 2026</div>
+  </header>
+
+  <section>
+    <h2>Who this covers</h2>
+    <p>Career Assistant is a mobile application that analyses your CV, builds a learning roadmap
+    towards a target job role, matches you to live job openings, and lets you practise interview
+    questions. This policy describes what the app collects and what happens to it.</p>
+    <p class="muted">Contact for any question or request in this policy:
+    <a href="mailto:rashidmostafa004@gmail.com">rashidmostafa004@gmail.com</a>.</p>
+  </section>
+
+  <section>
+    <h2>What is collected, and why</h2>
+    <table>
+      <tr><th>Data</th><th>Why</th></tr>
+      <tr><td>Name, email address, and optionally a phone number</td><td>To create and identify your account</td></tr>
+      <tr><td>Password</td><td>Stored only as a bcrypt hash. The original is never written down and cannot be recovered from it.</td></tr>
+      <tr><td>Your CV, and the text extracted from it</td><td>To score it, list its weaknesses, and produce an improved version</td></tr>
+      <tr><td>Target job role or roles</td><td>To choose which jobs, roadmap and interview questions you are shown</td></tr>
+      <tr><td>Jobs you mark as applied</td><td>To show your own application history back to you</td></tr>
+      <tr><td>Interview answers, scores and practice history</td><td>To show progress and resurface questions you answered poorly</td></tr>
+      <tr><td>Sign-in records: time, IP address, device identifier</td><td>Security. Used to show you your own active sessions and to detect unusual sign-ins.</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>Your fingerprint never leaves your phone</h2>
+    <div class="panel">
+      <p style="margin:0">If you turn on fingerprint sign-in, the fingerprint itself is handled entirely
+      by your phone's operating system. The app is never given it, cannot read it, and never transmits it.
+      What is stored on the server is a hashed identifier for the <em>device</em> — enough to recognise
+      that the phone was unlocked by its owner, and nothing more.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Who your data is shared with</h2>
+    <p>It is not sold, rented, or used for advertising. It is shared only with the services the app
+    needs to function:</p>
+    <ul>
+      <li><strong>Google (Gemini)</strong> — the text of your CV and your interview answers are sent to
+      Google's model to be scored and to generate feedback, a roadmap, and cover letters. This is
+      necessary for those features to work.</li>
+      <li><strong>Careerjet</strong> — job searches are forwarded to Careerjet's API. Their terms require
+      the end user's IP address and browser identifier to accompany each search, so those are sent with it.</li>
+      <li><strong>MongoDB Atlas</strong> — where your account and its data are stored.</li>
+      <li><strong>Render</strong> — where the server runs.</li>
+      <li><strong>Google (Gmail API)</strong> — used to send you verification and two-factor codes.</li>
+      <li><strong>Google Sign-In</strong> — only if you choose to sign in with Google, in which case
+      Google provides your name, email address and profile picture.</li>
+    </ul>
+    <p class="muted">Data may also be disclosed if required by law.</p>
+  </section>
+
+  <section>
+    <h2>How long it is kept</h2>
+    <ul>
+      <li>Account data is kept until you delete your account.</li>
+      <li>Sign-in sessions expire after 30 days, and every session requires full re-authentication
+      after 8 weeks regardless.</li>
+      <li>Deleting your account schedules it for permanent removal after a 30-day grace period, during
+      which it can be restored. All sessions are revoked immediately.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Your rights</h2>
+    <p>From <strong>Profile → Security &amp; Privacy</strong> in the app you can:</p>
+    <ul>
+      <li><strong>Export everything</strong> held about you, as JSON or CSV.</li>
+      <li><strong>Delete your account</strong> and all associated data.</li>
+      <li><strong>See and revoke</strong> every device currently signed in.</li>
+      <li><strong>Review</strong> your own sign-in and security history.</li>
+    </ul>
+    <p>You can also email the address above and ask for any of these to be done for you.</p>
+  </section>
+
+  <section>
+    <h2>Security</h2>
+    <ul>
+      <li>Passwords are hashed with bcrypt at 12 rounds.</li>
+      <li>All traffic between the app and the server uses HTTPS.</li>
+      <li>Optional two-factor authentication, by authenticator app or emailed code.</li>
+      <li>Accounts lock after five consecutive failed sign-in attempts.</li>
+      <li>Sign-in tokens are rotated on every refresh, so a captured token has a short life.</li>
+    </ul>
+    <p class="muted">No system is perfectly secure, and this is stated plainly rather than promised away.</p>
+  </section>
+
+  <section>
+    <h2>Children</h2>
+    <p>Career Assistant is not directed at children under 16 and accounts are not knowingly created
+    for them. If you believe one has been, contact the address above and it will be removed.</p>
+  </section>
+
+  <section>
+    <h2>Changes</h2>
+    <p>If this policy changes materially, the date at the top will change and the app will show a
+    notice on next sign-in.</p>
+  </section>
+
+  <footer>
+    <p><a href="/">← Back to Career Assistant</a> · <a href="/terms.html">Terms of Service</a></p>
+  </footer>
+
+</div>
+</body>
+</html>
