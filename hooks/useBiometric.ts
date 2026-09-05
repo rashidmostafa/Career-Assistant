@@ -13,6 +13,11 @@ import { BiometricService, type BiometricType } from "@/services/biometricServic
 import { AuthApiService, type AuthResponse } from "@/services/authApiService";
 import { SessionManager } from "@/services/sessionManager";
 
+/** Why a fingerprint sign-in ended, carried with the result so it cannot lag. */
+export type LoginOutcome =
+  | { ok: true; response: AuthResponse }
+  | { ok: false; reason: "choose_account" | "unknown_number" | "none" | "cancelled" | "error"; message?: string };
+
 export interface UseBiometricReturn {
   /** Whether biometric hardware + enrollments are available. */
   available: boolean;
@@ -45,7 +50,7 @@ export interface UseBiometricReturn {
    *
    * @returns AuthResponse on success, or null on failure/cancel.
    */
-  login: (userNumber?: string) => Promise<AuthResponse | null>;
+  login: (userNumber?: string) => Promise<LoginOutcome>;
 
   /**
    * Local-only re-authentication (no server call).
@@ -131,25 +136,35 @@ export function useBiometric(): UseBiometricReturn {
   }, []);
 
   // ── login ─────────────────────────────────────────────────────────────────
-  const login = useCallback(async (userNumber?: string): Promise<AuthResponse | null> => {
+  /**
+   * Returns why it stopped, rather than a bare null.
+   *
+   * The caller used to infer the reason from `error`, which is React state and
+   * therefore still stale in the same tick — so "several accounts use this
+   * device", a question, was rendered as "Biometric authentication failed", a
+   * failure. The reason travels with the result now, so it cannot lag.
+   */
+  const login = useCallback(async (userNumber?: string): Promise<LoginOutcome> => {
     setError(null);
     setLoading(true);
     try {
       const outcome = await BiometricService.biometricLogin({ userNumber });
-      if (outcome.status !== "ok") {
-        // Passed back rather than flattened to an error: "several accounts use
-        // this device" is a question to ask, not a failure to report.
-        setError(
-          outcome.status === "choose_account" ? null
-          : outcome.status === "unknown_number" ? "No account with that number uses fingerprint sign-in on this device."
-          : outcome.status === "none" ? "Fingerprint sign-in isn't set up on this device."
-          : "Fingerprint sign-in cancelled.",
-        );
-        setNeedsUserNumber(outcome.status === "choose_account");
-        return null;
-      }
-      setNeedsUserNumber(false);
 
+      if (outcome.status === "choose_account") {
+        // A question, not a failure: nothing is shown in red for this.
+        setNeedsUserNumber(true);
+        return { ok: false, reason: "choose_account" };
+      }
+      if (outcome.status !== "ok") {
+        const message =
+          outcome.status === "unknown_number" ? "No account with that number uses fingerprint sign-in on this device."
+          : outcome.status === "none"         ? "Fingerprint sign-in isn't set up on this device."
+          : "Fingerprint sign-in cancelled.";
+        setError(message);
+        return { ok: false, reason: outcome.status, message };
+      }
+
+      setNeedsUserNumber(false);
       const response = await AuthApiService.verifyBiometric(
         outcome.userId,
         outcome.credentialIdHash
@@ -162,10 +177,11 @@ export function useBiometric(): UseBiometricReturn {
         expiresAt:    response.expiresAt,
       });
 
-      return response;
+      return { ok: true, response };
     } catch (e: any) {
-      setError(e?.message ?? "Biometric sign-in failed.");
-      return null;
+      const message = e?.message ?? "Fingerprint sign-in failed.";
+      setError(message);
+      return { ok: false, reason: "error", message };
     } finally {
       setLoading(false);
     }

@@ -160,3 +160,81 @@ describe("the account number", () => {
     expect(auth).toMatch(/replace\(\/\\D\/g, ""\)\.slice\(0, 8\)/);
   });
 });
+
+describe("being asked which account is not a failure", () => {
+  const screen = read("app/auth.tsx");
+  const hook = read("hooks/useBiometric.ts");
+
+  it("login reports its reason instead of returning a bare null", () => {
+    // The screen used to read `error` from the hook, which is React state and
+    // still stale in the same tick, so `null ?? "Biometric authentication
+    // failed"` rendered a failure while the app was merely waiting for a number.
+    expect(hook).toMatch(/export type LoginOutcome/);
+    expect(hook).toMatch(/reason: "choose_account"/);
+  });
+
+  it("shows nothing in red when the account number is being asked for", () => {
+    expect(screen).toMatch(/result\.reason === "choose_account"/);
+    const branch = screen.slice(screen.indexOf('result.reason === "choose_account"'));
+    expect(branch.slice(0, 400)).toMatch(/setError\(null\)/);
+  });
+
+  it("no longer falls back to a failure message on a null error", () => {
+    expect(screen).not.toMatch(/biometric\.error \?\?/);
+    expect(screen).not.toMatch(/Biometric authentication failed/);
+  });
+
+  it("stays silent when the user cancels their own prompt", () => {
+    expect(screen).toMatch(/result\.reason !== "cancelled"/);
+  });
+});
+
+describe("the account number checks itself", () => {
+  const screen = read("app/auth.tsx");
+
+  it("verifies on the eighth digit with no button to press", () => {
+    const effect = screen.slice(screen.indexOf("if (!biometric.needsUserNumber) return;"));
+    expect(effect.slice(0, 300)).toMatch(/userNumber\.length !== 8/);
+    expect(effect.slice(0, 300)).toMatch(/handleBiometricLogin\(\)/);
+  });
+
+  it("cannot fire twice while a check is already running", () => {
+    const effect = screen.slice(screen.indexOf("if (!biometric.needsUserNumber) return;"));
+    expect(effect.slice(0, 300)).toMatch(/\|\| loading/);
+  });
+
+  it("says how many digits are left, then that it is checking", () => {
+    expect(screen).toMatch(/Checking…/);
+    expect(screen).toMatch(/more digit/);
+  });
+
+  it("declares the handler before the effect that calls it", () => {
+    // A const reached backwards for is a ReferenceError waiting on render order.
+    expect(screen.indexOf("const handleBiometricLogin"))
+      .toBeLessThan(screen.indexOf("if (!biometric.needsUserNumber) return;"));
+  });
+});
+
+describe("the security screen explains what it is turning on", () => {
+  const security = read("app/auth-security.tsx");
+
+  it("is titled for the fingerprint, not for biometrics in general", () => {
+    expect(security).toMatch(/Fingerprint Sign-In/);
+  });
+
+  it("says whether it is on, rather than only offering a switch", () => {
+    expect(security).toMatch(/On for this device/);
+  });
+
+  it("states that the fingerprint never leaves the phone", () => {
+    expect(security).toMatch(/never leaves the phone/);
+  });
+
+  it("shows the account number where it becomes relevant", () => {
+    expect(security).toMatch(/user\.biometricEnabled && !!user\.userNumber/);
+  });
+
+  it("reassures that the password still works", () => {
+    expect(security).toMatch(/password keeps working/);
+  });
+});

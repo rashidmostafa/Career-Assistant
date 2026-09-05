@@ -348,34 +348,70 @@ export default function SecurityScreen() {
         )}
       </View>
 
-      {/* ── Biometric ── */}
+      {/* ── Fingerprint ── */}
       {biometricAvailable && (
         <>
-          <SectionHeader title="Biometric Authentication" colors={colors} />
+          <SectionHeader title="Fingerprint Sign-In" colors={colors} />
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={styles.switchRow}>
+            <View style={styles.bioHead}>
+              <View style={[styles.bioIcon, {
+                backgroundColor: user.biometricEnabled ? colors.success + "18" : colors.secondary,
+                borderColor: user.biometricEnabled ? colors.success + "40" : colors.border,
+              }]}>
+                <Fingerprint size={22} color={user.biometricEnabled ? colors.success : colors.mutedForeground} />
+              </View>
+
               <View style={{ flex: 1 }}>
                 <Text style={[styles.switchLabel, { color: colors.foreground }]}>
-                  Biometrics Login
+                  {user.biometricEnabled ? "On for this device" : "Off"}
                 </Text>
                 <Text style={[styles.switchSub, { color: colors.mutedForeground }]}>
-                  Sign in instantly using biometrics
+                  {user.biometricEnabled
+                    ? "Your fingerprint opens this account on this phone."
+                    : "Use your fingerprint instead of typing your password."}
                 </Text>
               </View>
+
               {loading === "bio"
                 ? <ActivityIndicator color={colors.primary} />
                 : (
                   <Switch
                     value={user.biometricEnabled}
                     onValueChange={handleToggleBiometric}
-                    trackColor={{ false: colors.border, true: colors.primary }}
+                    trackColor={{ false: colors.border, true: colors.success }}
                     thumbColor="#fff"
                     accessibilityRole="switch"
-                    accessibilityLabel="Biometrics login"
+                    accessibilityLabel="Fingerprint sign-in"
                     accessibilityState={{ checked: user.biometricEnabled }}
                   />
                 )
               }
+            </View>
+
+            {/* The account number only matters once this is on, and only on a
+                phone more than one account signs in from — so it is shown here,
+                where it is earned, rather than as permanent furniture. */}
+            {user.biometricEnabled && !!user.userNumber && (
+              <View style={[styles.bioNote, { borderTopColor: colors.border }]}>
+                <Text style={[styles.switchSub, { color: colors.mutedForeground, marginTop: 0 }]}>
+                  If someone else also uses fingerprint sign-in on this phone, you'll be asked for your account number:
+                </Text>
+                <Text style={[styles.bioNumber, { color: colors.foreground }]} selectable>
+                  {`${user.userNumber.slice(0, 4)} ${user.userNumber.slice(4)}`}
+                </Text>
+              </View>
+            )}
+
+            <View style={[styles.bioNote, { borderTopColor: colors.border }]}>
+              <Text style={[styles.bioFact, { color: colors.mutedForeground }]}>
+                • Your fingerprint never leaves the phone. The app is only told whether it matched.
+              </Text>
+              <Text style={[styles.bioFact, { color: colors.mutedForeground }]}>
+                • Turning this off here removes it from this device only.
+              </Text>
+              <Text style={[styles.bioFact, { color: colors.mutedForeground }]}>
+                • Your password keeps working either way.
+              </Text>
             </View>
           </View>
         </>
@@ -496,7 +532,12 @@ const styles = StyleSheet.create({
   actionBtnText: { fontFamily: "Inter_600SemiBold", fontSize: 14 },
   switchRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   switchLabel: { fontFamily: "Inter_600SemiBold", fontSize: 14 },
-  switchSub: { fontFamily: "Inter_500Medium", fontSize: 12, marginTop: 2 },
+  switchSub: { fontFamily: "Inter_500Medium", fontSize: 12, marginTop: 2, lineHeight: 17 },
+  bioHead: { flexDirection: "row", alignItems: "center", gap: 13 },
+  bioIcon: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1 },
+  bioNote: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 12, marginTop: 2 },
+  bioNumber: { fontFamily: "Inter_700Bold", fontSize: 18, letterSpacing: 2.5, marginTop: 6 },
+  bioFact: { fontFamily: "Inter_500Medium", fontSize: 11.5, lineHeight: 17, marginBottom: 3 },
   totpSetupCard: { borderRadius: 12, borderWidth: 1, padding: 14, marginTop: 8 },
   totpTitle: { fontFamily: "Inter_700Bold", fontSize: 14, marginBottom: 6 },
   totpSub: { fontFamily: "Inter_500Medium", fontSize: 12, lineHeight: 18 },

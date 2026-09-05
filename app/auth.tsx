@@ -186,21 +186,27 @@ export default function AuthScreen() {
       // locked") triggered a pointless second native biometric prompt before
       // showing the same error. One attempt, one prompt.
       const result = await biometric.login(userNumber || undefined);
-      if (result) {
+      if (result.ok) {
         // Populate AuthContext.user before navigating, or AuthGate bounces
         // straight back to /auth even though tokens are valid.
         await loadUserFromServer();
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         router.replace("/(tabs)");
-      } else {
-        setError(biometric.error ?? "Biometric authentication failed. Please sign in with your password.");
+      } else if (result.reason === "choose_account") {
+        // Being asked which account is not a failure. Showing "authentication
+        // failed" here told the user something had gone wrong while the app was
+        // simply waiting for their account number.
+        setError(null);
+      } else if (result.reason !== "cancelled") {
+        // A cancelled prompt is the user's own doing and needs no red text.
+        setError(result.message ?? "Fingerprint sign-in failed. Use your password instead.");
       }
     } catch (e: any) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, [biometric, loadUserFromServer, router]);
+  }, [biometric, userNumber, loadUserFromServer, router]);
 
   // ── Register ─────────────────────────────────────────────────────────────────
   const handleRegister = useCallback(async () => {
@@ -282,6 +288,15 @@ export default function AuthScreen() {
   // ─────────────────────────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────────────────────────
+  // Eight digits is the whole input, so it is also the submit signal — there is
+  // nothing further to confirm and a button would only add a step. Guarded on
+  // `loading` so a slow verify cannot be fired twice by a re-render.
+  React.useEffect(() => {
+    if (!biometric.needsUserNumber) return;
+    if (userNumber.length !== 8 || loading) return;
+    void handleBiometricLogin();
+  }, [userNumber, biometric.needsUserNumber, loading, handleBiometricLogin]);
+
   return (
     <KeyboardAvoidingView
       style={[styles.root, { backgroundColor: colors.background }]}
@@ -358,22 +373,40 @@ export default function AuthScreen() {
                           Several accounts use this device
                         </Text>
                         <Text style={[styles.accountHint, { color: colors.mutedForeground }]}>
-                          Enter your 8-digit account number to choose one. You'll find it in Profile.
+                          Enter your 8-digit account number. It's on your Profile.
                         </Text>
-                        <TextInput
-                          style={[styles.accountInput, {
-                            backgroundColor: colors.background,
-                            borderColor: colors.border,
-                            color: colors.foreground,
-                          }]}
-                          value={userNumber}
-                          onChangeText={(t) => setUserNumber(t.replace(/\D/g, "").slice(0, 8))}
-                          placeholder="1234 5678"
-                          placeholderTextColor={colors.mutedForeground}
-                          keyboardType="number-pad"
-                          maxLength={8}
-                          accessibilityLabel="Account number"
-                        />
+                        <View>
+                          <TextInput
+                            style={[styles.accountInput, {
+                              backgroundColor: colors.background,
+                              borderColor: userNumber.length === 8 ? colors.primary : colors.border,
+                              color: colors.foreground,
+                            }]}
+                            value={userNumber}
+                            onChangeText={(t) => setUserNumber(t.replace(/\D/g, "").slice(0, 8))}
+                            placeholder="1234 5678"
+                            placeholderTextColor={colors.mutedForeground}
+                            keyboardType="number-pad"
+                            maxLength={8}
+                            autoFocus
+                            editable={!loading}
+                            accessibilityLabel="Account number"
+                          />
+                          {/* Checked on the eighth digit, so this stands in for
+                              the button that would otherwise be here. */}
+                          {loading && userNumber.length === 8 && (
+                            <ActivityIndicator
+                              size="small"
+                              color={colors.primary}
+                              style={styles.accountSpinner}
+                            />
+                          )}
+                        </View>
+                        <Text style={[styles.accountHint, { color: colors.mutedForeground, marginTop: 7, marginBottom: 0 }]}>
+                          {userNumber.length === 8
+                            ? "Checking…"
+                            : `${8 - userNumber.length} more digit${8 - userNumber.length === 1 ? "" : "s"}`}
+                        </Text>
                       </View>
                     )}
                     <BiometricButton
@@ -743,6 +776,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
     fontFamily: "Inter_600SemiBold", fontSize: 17, letterSpacing: 3, textAlign: "center",
   },
+  accountSpinner: { position: "absolute", right: 14, top: 0, bottom: 0 },
   body: { paddingHorizontal: 24, paddingBottom: 40 },
   title: { fontFamily: "Inter_700Bold", fontSize: 26, letterSpacing: -0.6, marginBottom: 6, marginTop: 20 },
   subtitle: { fontFamily: "Inter_500Medium", fontSize: 14, lineHeight: 21, marginBottom: 20 },
