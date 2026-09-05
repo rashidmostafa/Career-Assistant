@@ -340,6 +340,18 @@ export default function ProfileScreen() {
             <>
               <Text style={[styles.displayName, { color: colors.foreground }]}>{user?.name}</Text>
               <Text style={[styles.displayEmail, { color: colors.mutedForeground }]}>{user?.email}</Text>
+              {/* Shown here because this is where someone looks for it: it is
+                  asked for at sign-in when several accounts share a phone, and
+                  a number nobody can find is a number nobody can type. Spaced
+                  in the middle so it can be read aloud in two halves. */}
+              {!!user?.userNumber && (
+                <View style={[styles.accountNumber, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
+                  <Text style={[styles.accountNumberLabel, { color: colors.mutedForeground }]}>ACCOUNT NUMBER</Text>
+                  <Text style={[styles.accountNumberValue, { color: colors.foreground }]} selectable>
+                    {`${user.userNumber.slice(0, 4)} ${user.userNumber.slice(4)}`}
+                  </Text>
+                </View>
+              )}
             </>
           )}
         </Animated.View>
@@ -504,6 +516,12 @@ const styles = StyleSheet.create({
   photoBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1, marginTop: 8 },
   photoBtnText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   displayName: { fontSize: 22, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
+  accountNumber: {
+    marginTop: 12, paddingHorizontal: 16, paddingVertical: 9,
+    borderRadius: 12, borderWidth: 1, alignItems: "center",
+  },
+  accountNumberLabel: { fontFamily: "Inter_600SemiBold", fontSize: 10, letterSpacing: 0.8 },
+  accountNumberValue: { fontFamily: "Inter_700Bold", fontSize: 19, letterSpacing: 2.5, marginTop: 2 },
   displayEmail: { fontSize: 14, fontFamily: "Inter_500Medium", marginTop: 4 },
   statsGrid: { flexDirection: "row", gap: 10, marginBottom: 20 },
   statCard: { flex: 1, borderRadius: 16, padding: 12, borderWidth: 1, alignItems: "center", gap: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },

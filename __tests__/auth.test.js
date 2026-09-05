@@ -766,34 +766,71 @@ describe("Biometric — BiometricService.saveCredential / clearCredential", () =
     expect(enrolled).toBe(false);
   });
 
-  test("isEnrolled returns true when AsyncStorage contains 'true'", async () => {
-    const AsyncStorage = require("@react-native-async-storage/async-storage");
-    AsyncStorage.getItem.mockResolvedValueOnce("true");
+  test("isEnrolled returns true when the device holds an enrolment", async () => {
+    // The enrolment map lives in SecureStore; the AsyncStorage flag is only a
+    // mirror of it, so this is what actually decides.
+    const SecureStore = require("expo-secure-store");
+    SecureStore.getItemAsync.mockResolvedValueOnce(
+      JSON.stringify({ user1: { credentialId: "c1", userNumber: "12345678" } }),
+    );
     const { BiometricService } = require("../services/biometricService");
-    const enrolled = await BiometricService.isEnrolled();
-    expect(enrolled).toBe(true);
+    expect(await BiometricService.isEnrolled()).toBe(true);
   });
 });
 
 describe("Biometric — BiometricService.biometricLogin", () => {
-  test("returns null when not enrolled", async () => {
-    const AsyncStorage = require("@react-native-async-storage/async-storage");
-    AsyncStorage.getItem.mockResolvedValueOnce(null); // BIOMETRIC_ENABLED_KEY
+  test("reports 'none' when nothing is enrolled on this device", async () => {
+    const SecureStore = require("expo-secure-store");
+    SecureStore.getItemAsync.mockResolvedValue(null);
     const { BiometricService } = require("../services/biometricService");
-    const result = await BiometricService.biometricLogin();
-    expect(result).toBeNull();
+    expect(await BiometricService.biometricLogin()).toEqual({ status: "none" });
   });
 
-  test("returns null when biometric challenge fails", async () => {
-    const AsyncStorage = require("@react-native-async-storage/async-storage");
-    AsyncStorage.getItem.mockResolvedValueOnce("true");
+  test("asks which account when several are enrolled here", async () => {
+    // A fingerprint proves the owner is present; it cannot say which account
+    // they meant, so the caller has to ask.
+    const SecureStore = require("expo-secure-store");
+    SecureStore.getItemAsync.mockResolvedValue(JSON.stringify({
+      a: { credentialId: "c1", userNumber: "11111111" },
+      b: { credentialId: "c2", userNumber: "22222222" },
+    }));
+    const { BiometricService } = require("../services/biometricService");
+    expect(await BiometricService.biometricLogin()).toEqual({ status: "choose_account", accounts: 2 });
+  });
+
+  test("resolves the account from the number typed", async () => {
+    const SecureStore = require("expo-secure-store");
+    SecureStore.getItemAsync.mockResolvedValue(JSON.stringify({
+      a: { credentialId: "c1", userNumber: "11111111" },
+      b: { credentialId: "c2", userNumber: "22222222" },
+    }));
+    const { BiometricService } = require("../services/biometricService");
+    const r = await BiometricService.biometricLogin({ userNumber: "2222 2222" });
+    expect(r.status).toBe("ok");
+    expect(r.userId).toBe("b");
+  });
+
+  test("rejects a number no account here answers to", async () => {
+    const SecureStore = require("expo-secure-store");
+    SecureStore.getItemAsync.mockResolvedValue(JSON.stringify({
+      a: { credentialId: "c1", userNumber: "11111111" },
+      b: { credentialId: "c2", userNumber: "22222222" },
+    }));
+    const { BiometricService } = require("../services/biometricService");
+    expect(await BiometricService.biometricLogin({ userNumber: "99999999" }))
+      .toEqual({ status: "unknown_number" });
+  });
+
+  test("reports cancelled when the fingerprint challenge is refused", async () => {
+    const SecureStore = require("expo-secure-store");
+    SecureStore.getItemAsync.mockResolvedValue(
+      JSON.stringify({ a: { credentialId: "c1", userNumber: "11111111" } }),
+    );
     const LocalAuth = require("expo-local-authentication");
-    LocalAuth.hasHardwareAsync.mockResolvedValueOnce(true);
-    LocalAuth.isEnrolledAsync.mockResolvedValueOnce(true);
     LocalAuth.authenticateAsync.mockResolvedValueOnce({ success: false, error: "user_cancel" });
     const { BiometricService } = require("../services/biometricService");
-    const result = await BiometricService.biometricLogin();
-    expect(result).toBeNull();
+    // Distinct from "none": there IS an account here, the user declined.
+    expect(await BiometricService.biometricLogin()).toEqual({ status: "cancelled" });
   });
 });
 
@@ -839,9 +876,10 @@ describe("Biometric — getBiometricLabel", () => {
 
   test("returns 'Biometric' when hardware is unavailable", async () => {
     const LocalAuth = require("expo-local-authentication");
-    LocalAuth.hasHardwareAsync.mockResolvedValueOnce(false);
+    LocalAuth.hasHardwareAsync.mockResolvedValue(false);
     const { BiometricService } = require("../services/biometricService");
     const label = await BiometricService.getBiometricLabel();
+    LocalAuth.hasHardwareAsync.mockResolvedValue(true);
     expect(label).toBe("Biometric");
   });
 });

@@ -97,24 +97,66 @@ describe("fingerprint only", () => {
   });
 });
 
-describe("one account per device, locally", () => {
+describe("several accounts may share a device", () => {
   const service = read("services/biometricService.ts");
   const hook = read("hooks/useBiometric.ts");
 
-  it("refuses to enrol over another account's binding", () => {
-    const fn = service.slice(service.indexOf("async saveCredential"));
-    expect(fn.slice(0, 900)).toMatch(/existingUser !== userId/);
+  it("holds a map of enrolments rather than a single credential", () => {
+    // A single slot meant a second enrolment overwrote the first and the button
+    // opened the wrong account.
+    expect(service).toMatch(/ACCOUNTS_KEY/);
+    expect(service).toMatch(/async readAccounts\(\)/);
   });
 
-  it("checks before prompting, so the user is not asked for a finger it will reject", () => {
-    const fn = service.slice(service.indexOf("async saveCredential"), service.indexOf("const hash = await sha256"));
-    expect(fn.indexOf("existingUser !== userId")).toBeLessThan(fn.indexOf("this.authenticate("));
+  it("stores the account number beside each credential", () => {
+    // So a typed number resolves an account locally, without asking the server
+    // who lives on this device.
+    expect(service).toMatch(/userNumber: String\(userNumber \?\? ""\)/);
   });
 
-  it("tells the user a refusal apart from a cancellation", () => {
-    // The two are indistinguishable from outside saveCredential, and calling a
-    // refusal a cancellation would send the user round the same loop forever.
-    expect(hook).toMatch(/Another account on this device already uses fingerprint/);
-    expect(service).toMatch(/async enrolledUserId\(\)/);
+  it("asks which account only when there is a choice to make", () => {
+    const fn = service.slice(service.indexOf("async biometricLogin("));
+    expect(fn).toMatch(/if \(ids\.length === 1\)/);
+    expect(fn).toMatch(/return \{ status: "choose_account"/);
+  });
+
+  it("matches the number after the fingerprint, never instead of it", () => {
+    const fn = service.slice(service.indexOf("async biometricLogin("));
+    const body = fn.slice(0, fn.indexOf("return {\n      status: \"ok\""));
+    expect(body.indexOf("this.authenticate(")).toBeLessThan(body.indexOf("opts.userNumber"));
+  });
+
+  it("rejects a number no account on this device answers to", () => {
+    expect(service).toMatch(/return \{ status: "unknown_number" \}/);
+    expect(hook).toMatch(/No account with that number uses fingerprint sign-in/);
+  });
+
+  it("keeps other accounts enrolled when one is turned off", () => {
+    const fn = service.slice(service.indexOf("async clearCredential("));
+    expect(fn.slice(0, 700)).toMatch(/delete map\[userId\]/);
+  });
+
+  it("migrates a device enrolled before the map existed", () => {
+    const fn = service.slice(service.indexOf("async readAccounts()"));
+    expect(fn.slice(0, 1200)).toMatch(/legacyUser/);
+  });
+});
+
+describe("the account number", () => {
+  it("is shown in Profile, where someone would look for it", () => {
+    const profile = read("app/(tabs)/profile.tsx");
+    expect(profile).toMatch(/ACCOUNT NUMBER/);
+    expect(profile).toMatch(/user\.userNumber\.slice\(0, 4\)/);
+  });
+
+  it("is asked for on the sign-in screen only when needed", () => {
+    const auth = read("app/auth.tsx");
+    expect(auth).toMatch(/biometric\.needsUserNumber && \(/);
+    expect(auth).toMatch(/keyboardType="number-pad"/);
+  });
+
+  it("accepts digits only, and exactly eight", () => {
+    const auth = read("app/auth.tsx");
+    expect(auth).toMatch(/replace\(\/\\D\/g, ""\)\.slice\(0, 8\)/);
   });
 });

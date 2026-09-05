@@ -94,6 +94,8 @@ export default function AuthScreen() {
   const [showConfirmPw, setShowConfirmPw] = useState(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
+  // Only used when this device has several enrolled accounts.
+  const [userNumber, setUserNumber] = useState("");
   const [otpError, setOtpError] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendLoading, setResendLoading] = useState(false);
@@ -183,7 +185,7 @@ export default function AuthScreen() {
       // path, which meant any definitive server rejection (e.g. "Account is
       // locked") triggered a pointless second native biometric prompt before
       // showing the same error. One attempt, one prompt.
-      const result = await biometric.login();
+      const result = await biometric.login(userNumber || undefined);
       if (result) {
         // Populate AuthContext.user before navigating, or AuthGate bounces
         // straight back to /auth even though tokens are valid.
@@ -347,6 +349,33 @@ export default function AuthScreen() {
                     Profile - Security, once, deliberately. */}
                 {biometricAvailable && biometric.isEnrolled && (
                   <View style={{ marginBottom: 4 }}>
+                    {/* Asked only when the fingerprint alone cannot say which
+                        account is signing in, the way a bank asks for a customer
+                        number on a shared phone. */}
+                    {biometric.needsUserNumber && (
+                      <View style={{ marginBottom: 12 }}>
+                        <Text style={[styles.accountPrompt, { color: colors.foreground }]}>
+                          Several accounts use this device
+                        </Text>
+                        <Text style={[styles.accountHint, { color: colors.mutedForeground }]}>
+                          Enter your 8-digit account number to choose one. You'll find it in Profile.
+                        </Text>
+                        <TextInput
+                          style={[styles.accountInput, {
+                            backgroundColor: colors.background,
+                            borderColor: colors.border,
+                            color: colors.foreground,
+                          }]}
+                          value={userNumber}
+                          onChangeText={(t) => setUserNumber(t.replace(/\D/g, "").slice(0, 8))}
+                          placeholder="1234 5678"
+                          placeholderTextColor={colors.mutedForeground}
+                          keyboardType="number-pad"
+                          maxLength={8}
+                          accessibilityLabel="Account number"
+                        />
+                      </View>
+                    )}
                     <BiometricButton
                       type={biometricType}
                       onPress={handleBiometricLogin}
@@ -708,6 +737,12 @@ const styles = StyleSheet.create({
   // contain, so the mark is never cropped by the circle.
   logoMark: { width: 36, height: 36 },
   appName: { fontFamily: "Inter_700Bold", fontSize: 20, letterSpacing: -0.4 },
+  accountPrompt: { fontFamily: "Inter_700Bold", fontSize: 14, marginBottom: 3 },
+  accountHint: { fontFamily: "Inter_500Medium", fontSize: 12, lineHeight: 17, marginBottom: 9 },
+  accountInput: {
+    borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+    fontFamily: "Inter_600SemiBold", fontSize: 17, letterSpacing: 3, textAlign: "center",
+  },
   body: { paddingHorizontal: 24, paddingBottom: 40 },
   title: { fontFamily: "Inter_700Bold", fontSize: 26, letterSpacing: -0.6, marginBottom: 6, marginTop: 20 },
   subtitle: { fontFamily: "Inter_500Medium", fontSize: 14, lineHeight: 21, marginBottom: 20 },

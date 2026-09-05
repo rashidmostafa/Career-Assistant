@@ -46,6 +46,9 @@ export interface TargetRole {
 
 export interface User {
   id: string;
+  /** The account's public number, shown in Profile and typed at sign-in when
+   *  several accounts share a device. Eight digits. */
+  userNumber: string;
   name: string;
   email: string;
   phone?: string;
@@ -115,7 +118,7 @@ export interface AuthContextType {
   confirmEmailVerified: (otp: string) => Promise<void>;
   // ── New auth API ─────────────────────────────────────────────────────────────
   verify2FA: (code: string, method: "totp" | "email" | "backup", trustDevice?: boolean) => Promise<void>;
-  loginWithBiometric: () => Promise<boolean>;
+  loginWithBiometric: (userNumber?: string) => Promise<boolean>;
   enrollBiometric: () => Promise<boolean>;
   disableBiometric: () => Promise<void>;
   reauthenticate: (method: "biometric" | "password" | "security_questions", credential?: string | Array<{ question: string; answer: string }>) => Promise<boolean>;
@@ -192,6 +195,7 @@ function mapServerUser(raw: any): User {
   };
   return {
     id:    raw._id?.toString?.() ?? raw.id ?? "",
+    userNumber: raw.userNumber ?? "",
     name:  raw.name ?? "",
     email: raw.email ?? "",
     phone: raw.phone,
@@ -448,11 +452,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Biometric — credential lives on-device (SecureStore); the hash + userId are
   // exchanged with the server for a real session, same as password login.
   // ─────────────────────────────────────────────────────────────────────────────
-  const loginWithBiometric = useCallback(async (): Promise<boolean> => {
+  const loginWithBiometric = useCallback(async (userNumber?: string): Promise<boolean> => {
     try {
-      const credential = await BiometricService.biometricLogin();
-      if (!credential) return false;
-      const result = await AuthApiService.verifyBiometric(credential.userId, credential.credentialIdHash);
+      // Anything but "ok" means the caller has something to ask or say — most
+      // often that this device holds several accounts and needs the number.
+      const outcome = await BiometricService.biometricLogin({ userNumber });
+      if (outcome.status !== "ok") return false;
+      const result = await AuthApiService.verifyBiometric(outcome.userId, outcome.credentialIdHash);
       await SessionManager.saveTokens({
         accessToken:  result.accessToken,
         refreshToken: result.refreshToken,
@@ -468,7 +474,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const enrollBiometric = useCallback(async (): Promise<boolean> => {
     if (!user) return false;
     const credentialId = `${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const result = await BiometricService.saveCredential(credentialId, user.id);
+    // The number travels with the credential so a later sign-in can resolve
+    // which account it belongs to without asking the server.
+    const result = await BiometricService.saveCredential(credentialId, user.id, user.userNumber);
     if (!result) return false;
     await AuthApiService.registerBiometric(result.hash);
     await persistUser({ ...user, biometricEnabled: true });

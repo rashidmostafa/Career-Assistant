@@ -17,30 +17,41 @@ describe("registerBiometric", () => {
     expect(fn).toMatch(/x-device-id/);
   });
 
-  it("refuses when the device belongs to another account", () => {
-    expect(fn).toMatch(/biometricDeviceId: deviceId/);
-    expect(fn).toMatch(/_id:\s*\{ \$ne: userId \}/);
-    expect(fn).toMatch(/biometricEnabled:\s*true/);
+  it("rejects a request with no device identity rather than binding to nothing", () => {
+    expect(fn).toMatch(/if \(!deviceId\)/);
   });
 
-  it("refuses with 409 and a code the client can act on", () => {
-    expect(fn).toMatch(/status: 409/);
-    expect(fn).toMatch(/BIOMETRIC_DEVICE_TAKEN/);
-  });
-
-  it("names the holding account only in masked form", () => {
-    // Enough for the phone's owner to recognise their own other account,
-    // without printing a full address to whoever is holding it.
-    expect(fn).toMatch(/maskEmail\(/);
-    expect(fn).not.toMatch(/\$\{taken\.email\}/);
-  });
-
-  it("records the device, so the next account can be refused", () => {
+  it("records the device against the account", () => {
     expect(fn).toMatch(/biometricDeviceId:\s*deviceId/);
   });
 
-  it("rejects a request with no device identity rather than binding to nothing", () => {
-    expect(fn).toMatch(/if \(!deviceId\)/);
+  it("no longer refuses a second account on the same device", () => {
+    // Refusing stopped a shared phone working at all. Several accounts may
+    // enrol; the user's number resolves which one is signing in.
+    expect(fn).not.toMatch(/BIOMETRIC_DEVICE_TAKEN/);
+    expect(fn).not.toMatch(/status: 409/);
+  });
+});
+
+describe("verifyBiometric", () => {
+  const fn = src.slice(src.indexOf("async verifyBiometric"), src.indexOf("async disableBiometric"));
+
+  it("accepts an account number as well as an id", () => {
+    expect(fn).toMatch(/userNumber/);
+    expect(fn).toMatch(/findOne\(\{ userNumber/);
+  });
+
+  it("requires one of them, and always the credential", () => {
+    expect(fn).toMatch(/!credentialIdHash \|\| \(!userId && !userNumber\)/);
+  });
+
+  it("strips formatting from a typed number", () => {
+    // The client shows "1234 5678"; a user may type it with the space.
+    expect(fn).toMatch(/replace\(\/\\D\/g, ""\)/);
+  });
+
+  it("still checks the stored credential, whichever way the account was named", () => {
+    expect(fn).toMatch(/timingSafeEqual/);
   });
 });
 
@@ -53,31 +64,30 @@ describe("disableBiometric", () => {
   });
 });
 
-describe("maskEmail", () => {
-  // Re-declared rather than imported: it is a module-local helper.
-  const maskEmail = (email) => {
-    const [name, domain] = String(email ?? "").split("@");
-    if (!domain) return "another account";
-    return `${name.slice(0, 1)}${"*".repeat(Math.max(name.length - 1, 1))}@${domain}`;
-  };
-
-  it("keeps the first letter and the domain", () => {
-    expect(maskEmail("rashid@gmail.com")).toBe("r*****@gmail.com");
-  });
-
-  it("does not leak the length of a one-character name", () => {
-    expect(maskEmail("a@x.com")).toBe("a*@x.com");
-  });
-
-  it("degrades safely on nonsense", () => {
-    expect(maskEmail("")).toBe("another account");
-    expect(maskEmail(undefined)).toBe("another account");
-  });
-});
-
-describe("the User model records the device", () => {
+describe("the User model", () => {
   const model = require("fs").readFileSync(require.resolve("../models/User.js"), "utf8");
-  it("has an indexed biometricDeviceId", () => {
+
+  it("records which device an account enrolled on", () => {
     expect(model).toMatch(/biometricDeviceId:\s*\{ type: String, index: true \}/);
+  });
+
+  it("gives every account a unique 8-digit number", () => {
+    expect(model).toMatch(/userNumber:/);
+    expect(model).toMatch(/unique: true/);
+    expect(model).toMatch(/\^\\d\{8\}\$/);
+  });
+
+  it("allocates one on every creation path, not at each call site", () => {
+    // Local registration and Google sign-in both create users; a hook covers
+    // both and anything added later.
+    expect(model).toMatch(/UserSchema\.pre\("save"[\s\S]*?generateUserNumber/);
+  });
+
+  it("checks a candidate is free before using it", () => {
+    expect(model).toMatch(/await this\.exists\(\{ userNumber: n \}\)/);
+  });
+
+  it("is sparse, so accounts predating the field stay valid", () => {
+    expect(model).toMatch(/sparse: true/);
   });
 });

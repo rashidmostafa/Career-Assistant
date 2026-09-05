@@ -26,6 +26,8 @@ export interface UseBiometricReturn {
   loading: boolean;
   /** Last error message, if any. */
   error: string | null;
+  /** The device has several enrolments; ask for the account number. */
+  needsUserNumber: boolean;
 
   /**
    * Enrol biometric for the current user.
@@ -35,7 +37,7 @@ export interface UseBiometricReturn {
    * @param userId  The authenticated user's ID.
    * @returns true on success.
    */
-  enroll: (userId: string) => Promise<boolean>;
+  enroll: (userId: string, userNumber?: string) => Promise<boolean>;
 
   /**
    * Full biometric login: prompts the user, retrieves the stored credential,
@@ -43,7 +45,7 @@ export interface UseBiometricReturn {
    *
    * @returns AuthResponse on success, or null on failure/cancel.
    */
-  login: () => Promise<AuthResponse | null>;
+  login: (userNumber?: string) => Promise<AuthResponse | null>;
 
   /**
    * Local-only re-authentication (no server call).
@@ -71,6 +73,9 @@ export function useBiometric(): UseBiometricReturn {
   const [biometricType,  setBiometricType]  = useState<BiometricType>("None");
   const [biometricLabel, setBiometricLabel] = useState("Biometric");
   const [isEnrolled,     setIsEnrolled]     = useState(false);
+  // True when the device holds several enrolments and the account number is
+  // needed to say which one is signing in.
+  const [needsUserNumber, setNeedsUserNumber] = useState(false);
   const [loading,        setLoading]        = useState(false);
   const [error,          setError]          = useState<string | null>(null);
 
@@ -94,20 +99,15 @@ export function useBiometric(): UseBiometricReturn {
   }, []);
 
   // ── enroll ────────────────────────────────────────────────────────────────
-  const enroll = useCallback(async (userId: string): Promise<boolean> => {
+  const enroll = useCallback(async (userId: string, userNumber = ""): Promise<boolean> => {
     setError(null);
     setLoading(true);
     try {
       // Generate a unique credential ID for this device + user combination
       const credentialId = `${userId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const result = await BiometricService.saveCredential(credentialId, userId);
+      const result = await BiometricService.saveCredential(credentialId, userId, userNumber);
       if (!result) {
-        // saveCredential also refuses when another account already holds this
-        // device, which is not a cancellation and must not read as one.
-        const holder = await BiometricService.enrolledUserId();
-        setError(holder && holder !== userId
-          ? "Another account on this device already uses fingerprint sign-in. Turn it off there first."
-          : "Fingerprint confirmation was cancelled.");
+        setError("Fingerprint confirmation was cancelled.");
         return false;
       }
 
@@ -131,19 +131,28 @@ export function useBiometric(): UseBiometricReturn {
   }, []);
 
   // ── login ─────────────────────────────────────────────────────────────────
-  const login = useCallback(async (): Promise<AuthResponse | null> => {
+  const login = useCallback(async (userNumber?: string): Promise<AuthResponse | null> => {
     setError(null);
     setLoading(true);
     try {
-      const credential = await BiometricService.biometricLogin();
-      if (!credential) {
-        setError("Biometric sign-in cancelled or unavailable.");
+      const outcome = await BiometricService.biometricLogin({ userNumber });
+      if (outcome.status !== "ok") {
+        // Passed back rather than flattened to an error: "several accounts use
+        // this device" is a question to ask, not a failure to report.
+        setError(
+          outcome.status === "choose_account" ? null
+          : outcome.status === "unknown_number" ? "No account with that number uses fingerprint sign-in on this device."
+          : outcome.status === "none" ? "Fingerprint sign-in isn't set up on this device."
+          : "Fingerprint sign-in cancelled.",
+        );
+        setNeedsUserNumber(outcome.status === "choose_account");
         return null;
       }
+      setNeedsUserNumber(false);
 
       const response = await AuthApiService.verifyBiometric(
-        credential.userId,
-        credential.credentialIdHash
+        outcome.userId,
+        outcome.credentialIdHash
       );
 
       // Persist the new tokens so the rest of the app is immediately authenticated.
@@ -204,6 +213,7 @@ export function useBiometric(): UseBiometricReturn {
     biometricType,
     biometricLabel,
     isEnrolled,
+    needsUserNumber,
     loading,
     error,
     enroll,

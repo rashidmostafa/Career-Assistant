@@ -16,18 +16,6 @@ const AuditLog  = require("../models/AuditLog");
 const { issueAccessToken, issueRefreshToken, verifyRefreshToken } = require("../middleware/authMiddleware");
 const { blockIP } = require("../middleware/rateLimiter");
 
-/**
- * "rashid@gmail.com" -> "r*****@gmail.com".
- *
- * Enough for the device's owner to recognise their own other account, without
- * printing a full address to whoever is holding the phone.
- */
-function maskEmail(email) {
-  const [name, domain] = String(email ?? "").split("@");
-  if (!domain) return "another account";
-  const head = name.slice(0, 1);
-  return `${head}${"*".repeat(Math.max(name.length - 1, 1))}@${domain}`;
-}
 
 const EmailService = require("./emailService");
 const dns = require("dns").promises;
@@ -710,21 +698,11 @@ const AuthService = {
       throw Object.assign(new Error("Device could not be identified."), { status: 400 });
     }
 
-    // One account per device. The prompt proves someone authorised on this
-    // phone; it cannot say who. With two accounts enrolled here, a tap on
-    // "Sign in with biometrics" would have no defensible answer, so the second
-    // enrolment is refused rather than silently taking the first one's place.
-    const taken = await User.findOne({
-      biometricDeviceId: deviceId,
-      biometricEnabled:  true,
-      _id:               { $ne: userId },
-    }).select("email");
-    if (taken) {
-      throw Object.assign(
-        new Error(`Biometric sign-in on this device is already set up for ${maskEmail(taken.email)}. Turn it off there first.`),
-        { status: 409, code: "BIOMETRIC_DEVICE_TAKEN" },
-      );
-    }
+    // Several accounts may enrol on one device. A fingerprint cannot say which
+    // of them is signing in — the OS reports only that someone authorised — so
+    // the device is recorded and the user's number resolves the ambiguity at
+    // sign-in. Refusing the second account instead, as an earlier version did,
+    // stopped a shared phone working at all.
 
     const hash = this.hashBiometricToken(credentialIdHash);
     await User.findByIdAndUpdate(userId, {
@@ -738,11 +716,17 @@ const AuthService = {
   },
 
   // ── Biometric: verify a credential and issue tokens ──────────────────────
-  async verifyBiometric({ userId, credentialIdHash }, req) {
-    if (!userId || !credentialIdHash) {
-      throw Object.assign(new Error("userId and credentialIdHash are required."), { status: 400 });
+  async verifyBiometric({ userId, userNumber, credentialIdHash }, req) {
+    if (!credentialIdHash || (!userId && !userNumber)) {
+      throw Object.assign(new Error("credentialIdHash and one of userId or userNumber are required."), { status: 400 });
     }
-    const user = await User.findById(userId).select("+biometricTokenHash");
+
+    // Addressed by number when the device holds more than one enrolled account:
+    // the fingerprint proves the owner is present, the number says whose
+    // account to open. Both paths still have to match the stored credential.
+    const user = userNumber
+      ? await User.findOne({ userNumber: String(userNumber).replace(/\D/g, "") }).select("+biometricTokenHash")
+      : await User.findById(userId).select("+biometricTokenHash");
     if (!user || !user.biometricEnabled || !user.biometricTokenHash) {
       throw Object.assign(new Error("Biometric login not enrolled for this account."), { status: 401 });
     }
