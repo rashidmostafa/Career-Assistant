@@ -261,7 +261,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (e: any) {
       setUnreachable(true);
-      setError("Couldn't load jobs. Check your connection and pull down to try again.");
+      setError(e?.code === "SESSION_EXPIRED"
+        ? "Your session expired. Sign out and back in to load jobs."
+        : "Couldn't load jobs. Check your connection and pull down to try again.");
     } finally {
       setIsLoading(false);
     }

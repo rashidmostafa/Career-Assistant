@@ -177,6 +177,12 @@ async function fetchCareerjet(opts: { keywords?: string; location?: string }): P
       requiredSkills: extractSkills(`${j.title} ${j.description}`),
     }));
   } catch (e: any) {
+    // A dead session is not a Careerjet fault, and reporting it as one sends
+    // the user to check the job board while the real fix is signing in again.
+    if (e?.code === "SESSION_EXPIRED" || e?.status === 401) {
+      console.warn("[jobs] session expired while loading jobs");
+      throw Object.assign(new Error("session_expired"), { code: "SESSION_EXPIRED" });
+    }
     console.warn("[jobs] Careerjet request failed:", e?.message ?? e);
     return null;
   }
@@ -189,6 +195,9 @@ async function fetchCareerjet(opts: { keywords?: string; location?: string }): P
  * which is stricter and cheaper than pulling everything and filtering here.
  */
 export async function fetchLiveJobs(opts: { keywords?: string; location?: string } = {}): Promise<FeedResult> {
+  // Deliberately not caught here: an expired session is the caller's problem to
+  // report, and swallowing it would show an empty job list to someone who is
+  // simply signed out.
   const careerjet = await fetchCareerjet(opts);
 
   // Null means unreachable or unconfigured. With one source there is nothing to
