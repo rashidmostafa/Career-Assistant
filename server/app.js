@@ -58,6 +58,7 @@ const aiRoutes   = require("./routes/ai");
 const dataRoutes = require("./routes/data");
 const cvRoutes   = require("./routes/cv");
 const jobRoutes  = require("./routes/jobs");
+const interviewRoutes = require("./routes/interview");
 const { startDeletionWorker } = require("./services/deletionWorker");
 
 const app  = express();
@@ -167,6 +168,7 @@ app.use("/api/ai",   aiRoutes);
 app.use("/api/data", dataRoutes);
 app.use("/api/cv",   cvRoutes);
 app.use("/api/jobs", jobRoutes);
+app.use("/api/interview", interviewRoutes);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ message: "Not found." }));

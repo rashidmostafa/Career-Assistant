@@ -72,9 +72,9 @@ export default function HomeScreen() {
     {
       id: "interview",
       label: "Interview Prep",
-      description: "AI mock interviews & feedback",
+      description: "Practice questions for your target role",
       icon: Mic,
-      color: colors.interview || "#db2777",
+      color: colors.interview || "#4f46e5",
       route: "/(tabs)/interview",
     },
   ];

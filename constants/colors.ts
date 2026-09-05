@@ -23,7 +23,7 @@ const colors = {
     jobs: "#7c3aed",
     cv: "#0891b2",
     roadmap: "#059669",
-    interview: "#db2777",
+    interview: "#4f46e5",
     portfolio: "#ea580c",
   },
   dark: {
@@ -50,7 +50,7 @@ const colors = {
     jobs: "#a78bfa",
     cv: "#22d3ee",
     roadmap: "#34d399",
-    interview: "#f472b6",
+    interview: "#818cf8",
     portfolio: "#fb923c",
   },
   radius: 12,

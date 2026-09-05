@@ -51,8 +51,7 @@ export type HawkTask =
   | "skill_extractor"
   | "job_matcher"
   | "ats_scorer"
-  | "roadmap_generator"
-  | "interview_bank";
+  | "roadmap_generator";
 
 /** Shape returned by POST /v1/hawk/{task}. */
 interface HawkEnvelope<T> {
@@ -146,11 +145,6 @@ export interface HawkRoadmap {
   };
 }
 
-export interface HawkInterviewQuestion {
-  category: string;
-  question: string;
-}
-
 /**
  * Posts to a Hawk task endpoint. Returns null on any failure — unconfigured,
  * unreachable, timed out, or a reply the server itself flagged as incomplete —
@@ -236,7 +230,3 @@ export function generateRoadmap(currentSkills: string[], targetRole: string) {
   );
 }
 
-/** Generate ONE interview question for a role/topic prompt. */
-export function generateInterviewQuestion(prompt: string) {
-  return callHawk<HawkInterviewQuestion>("interview_bank", prompt);
-}
