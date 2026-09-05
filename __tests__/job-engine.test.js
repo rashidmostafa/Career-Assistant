@@ -239,3 +239,35 @@ describe("applied jobs drop ids from boards no longer read", () => {
     expect(live(["careerjetsomething"])).toHaveLength(0);
   });
 });
+
+/**
+ * The feed must not fetch for nobody.
+ *
+ * JobsProvider mounts outside AuthGate, so its mount effect runs on every cold
+ * start — including one where no user is signed in. An unauthenticated request
+ * to a protected endpoint can only 401, and after the token-refresh work that
+ * 401 is reported as an expired session: a device that had never signed in was
+ * told its session had expired, on every launch.
+ */
+describe("rule 2 — the feed waits for a signed-in user", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const src = fs.readFileSync(path.join(__dirname, "..", "context/JobsContext.tsx"), "utf8");
+
+  it("guards the mount fetch on there being a user", () => {
+    const effect = src.slice(src.indexOf("// Fetched once there is somebody"));
+    expect(effect).toMatch(/if \(!user\) return;/);
+  });
+
+  it("guards refreshJobs itself, so pull-to-refresh cannot fire either", () => {
+    const fn = src.slice(src.indexOf("const refreshJobs = useCallback"));
+    expect(fn.slice(0, 400)).toMatch(/if \(!user\)/);
+  });
+
+  it("depends on user, so signing in triggers the first load", () => {
+    // Without user in the dependency list the guard would latch: the effect
+    // would never re-run after sign-in and the feed would stay empty.
+    const effect = src.slice(src.indexOf("// Fetched once there is somebody"));
+    expect(effect).toMatch(/\}, \[user, refreshJobs\]\);/);
+  });
+});
