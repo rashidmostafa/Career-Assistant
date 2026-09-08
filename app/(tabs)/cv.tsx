@@ -84,6 +84,34 @@ export default function CVScreen() {
     }
   };
 
+  /**
+   * The other way to get a CV: write one here rather than upload one.
+   *
+   * Offered beside the upload in both states — someone with no CV cannot follow
+   * an instruction to upload one, and someone who has a CV may still want a
+   * second written for a different role.
+   */
+  const BuildFromScratch = ({ subtitle }: { subtitle: string }) => (
+    <Pressable
+      onPress={() => router.push("/cv-builder")}
+      style={({ pressed }) => [
+        styles.buildCard,
+        { backgroundColor: colors.card, borderColor: accent + "44", opacity: pressed ? 0.85 : 1 },
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel="Build a CV from scratch"
+    >
+      <View style={[styles.buildIcon, { backgroundColor: accent + "18" }]}>
+        <Feather name="edit-3" size={18} color={accent} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.buildTitle, { color: colors.foreground }]}>Build CV from scratch</Text>
+        <Text style={[styles.buildSub, { color: colors.mutedForeground }]}>{subtitle}</Text>
+      </View>
+      <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+    </Pressable>
+  );
+
   const UploadButton = ({ label }: { label: string }) => (
     <Pressable
       onPress={upload}
@@ -209,6 +237,11 @@ export default function CVScreen() {
             unreadable exports are caught before anything is scored.
           </Text>
           <UploadButton label="Choose file" />
+
+          <View style={[styles.orRow, { borderTopColor: colors.border }]}>
+            <Text style={[styles.orText, { color: colors.mutedForeground }]}>or</Text>
+          </View>
+          <BuildFromScratch subtitle="No CV yet? Answer a few questions and the app writes one for you" />
         </View>
       );
     }
@@ -216,6 +249,7 @@ export default function CVScreen() {
     // A CV exists. Re-uploading stays available from here (step 8).
     return (
       <View style={{ gap: 14 }}>
+        <BuildFromScratch subtitle="Write another one, aimed at a different role" />
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 14 }]}>
           <View style={styles.fileRow}>
             <Feather name={cv.kind === "pdf" ? "file-text" : "file"} size={18} color={accent} />
@@ -594,6 +628,15 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 20, paddingBottom: 14, borderBottomWidth: 1 },
   title: { fontSize: 24, fontWeight: "800" },
   centred: { alignItems: "center", justifyContent: "center", paddingVertical: 60 },
+  buildCard: {
+    flexDirection: "row", alignItems: "center", gap: 13,
+    padding: 14, borderRadius: 16, borderWidth: 1,
+  },
+  buildIcon: { width: 42, height: 42, borderRadius: 13, alignItems: "center", justifyContent: "center" },
+  buildTitle: { fontFamily: "Inter_700Bold", fontSize: 14.5, marginBottom: 2 },
+  buildSub: { fontFamily: "Inter_500Medium", fontSize: 12, lineHeight: 16.5 },
+  orRow: { alignSelf: "stretch", borderTopWidth: StyleSheet.hairlineWidth, marginTop: 6, paddingTop: 12, alignItems: "center" },
+  orText: { fontFamily: "Inter_500Medium", fontSize: 12 },
   card: { padding: 16, borderRadius: 16, borderWidth: 1 },
   empty: { alignItems: "center", gap: 12, paddingVertical: 28 },
   sectionTitle: { fontSize: 16, fontWeight: "700" },

@@ -168,3 +168,44 @@ describe("bullet rewriting refuses invented facts", () => {
     expect(addedFacts("Used MySQL for storage", "Designed the MySQL schema for storage")).toEqual([]);
   });
 });
+
+describe("where the builder is reached from", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const read = (p) => fs.readFileSync(path.join(__dirname, "..", p), "utf8");
+
+  it("is offered on the CV page, in both its states", () => {
+    // Someone with no CV cannot follow an instruction to upload one; someone
+    // who has one may still want a second for a different role.
+    const cv = read("app/(tabs)/cv.tsx");
+    expect(cv).toMatch(/Build CV from scratch/);
+    expect(cv).toMatch(/No CV yet\? Answer a few questions/);
+    expect(cv).toMatch(/Write another one, aimed at a different role/);
+    expect((cv.match(/<BuildFromScratch/g) ?? []).length).toBe(2);
+  });
+
+  it("is no longer in the Job Engine", () => {
+    const jobs = read("app/(tabs)/jobs.tsx");
+    expect(jobs).not.toMatch(/Build CV from scratch/);
+    expect(jobs).not.toMatch(/cv-builder/);
+  });
+
+  it("left no dead styles or icons behind in the Job Engine", () => {
+    const jobs = read("app/(tabs)/jobs.tsx");
+    expect(jobs).not.toMatch(/buildCard|buildIcon|buildTitle|buildSub|FilePlus2/);
+  });
+
+  it("restored the upload prompt's own wording", () => {
+    // It read "Already have one? Upload it instead", which only made sense
+    // sitting beneath the build card that is no longer there.
+    expect(read("app/(tabs)/jobs.tsx")).toMatch(/Upload your CV to see how well you match each job/);
+  });
+
+  it("still measures coverage without a specific job to aim at", () => {
+    // Entered from the CV tab there is no jobId, and the bar would otherwise
+    // never appear.
+    const b = read("app/cv-builder.tsx");
+    expect(b).toMatch(/if \(targetJob\) return targetJob\.requiredSkills/);
+    expect(b).toMatch(/MOST ASKED FOR IN YOUR/);
+  });
+});

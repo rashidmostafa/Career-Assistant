@@ -1,4 +1,4 @@
-import { Search, ArrowLeft, AlertCircle, Edit2, Check, Map, Clock, DollarSign, MapPin, Wifi, RefreshCw, ExternalLink, Send, Link, SlidersHorizontal, X, ShieldCheck, Star, FileText, FilePlus2, ChevronRight } from "lucide-react-native";
+import { Search, ArrowLeft, AlertCircle, Edit2, Check, Map, Clock, DollarSign, MapPin, Wifi, RefreshCw, ExternalLink, Send, Link, SlidersHorizontal, X, ShieldCheck, Star, FileText } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
@@ -374,33 +374,6 @@ export default function JobsScreen() {
    */
   const ListHeader = (
     <View style={{ marginBottom: 4 }}>
-      {/* ── Build CV from scratch ──
-          Offered here, and unconditionally, because the people who most need it
-          are the ones with no CV to upload — and the prompt below used to be the
-          only thing they were shown, which is an instruction they cannot follow.
-          Aimed at the user's target role; opened from a listing it aims at that
-          job instead. */}
-      <TouchableOpacity
-        style={[styles.buildCard, { backgroundColor: colors.card, borderColor: (colors.cv || "#0891b2") + "44" }]}
-        onPress={() => router.push("/cv-builder")}
-        activeOpacity={0.85}
-        accessibilityRole="button"
-        accessibilityLabel="Build a CV from scratch"
-      >
-        <View style={[styles.buildIcon, { backgroundColor: (colors.cv || "#0891b2") + "18" }]}>
-          <FilePlus2 size={19} color={colors.cv || "#0891b2"} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.buildTitle, { color: colors.foreground }]}>Build CV from scratch</Text>
-          <Text style={[styles.buildSub, { color: colors.mutedForeground }]}>
-            {hasCVSkills
-              ? "Write a second CV aimed at the jobs you're applying for"
-              : "No CV yet? Answer a few questions and the app writes one for you"}
-          </Text>
-        </View>
-        <ChevronRight size={18} color={colors.mutedForeground} />
-      </TouchableOpacity>
-
       {!hasCVSkills && (
         <TouchableOpacity
           style={[styles.cvPrompt, { backgroundColor: colors.accent, borderColor: colors.primary + "30" }]}
@@ -409,7 +382,7 @@ export default function JobsScreen() {
         >
           <FileText size={16} color={colors.primary} />
           <Text style={[styles.cvPromptText, { color: colors.primary }]}>
-            Already have one? Upload it instead
+            Upload your CV to see how well you match each job
           </Text>
         </TouchableOpacity>
       )}
@@ -745,13 +718,6 @@ const styles = StyleSheet.create({
   updateBadge: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, minHeight: 30, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" },
   updateText: { fontSize: 11, fontFamily: "Inter_500Medium" },
   backBtn: { marginRight: 16 },
-  buildCard: {
-    flexDirection: "row", alignItems: "center", gap: 13,
-    padding: 14, borderRadius: 16, borderWidth: 1, marginBottom: 12,
-  },
-  buildIcon: { width: 42, height: 42, borderRadius: 13, alignItems: "center", justifyContent: "center" },
-  buildTitle: { fontFamily: "Inter_700Bold", fontSize: 14.5, marginBottom: 2 },
-  buildSub: { fontFamily: "Inter_500Medium", fontSize: 12, lineHeight: 16.5 },
   cvPrompt: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 14, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 14, borderWidth: 1 },
   cvPromptText: { flex: 1, fontSize: 13, fontFamily: "Inter_500Medium", lineHeight: 18 },
   searchRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 12 },

@@ -1,9 +1,10 @@
 /**
  * Build CV from scratch.
  *
- * Reached from the Job Engine, because the CV it produces is aimed at the role
- * the user is applying for: the coverage bar compares what they have written so
- * far against the skills that role actually asks for.
+ * Reached from the CV Engine, which is where someone goes when they need a CV.
+ * The coverage bar compares what they have written so far against what their
+ * job matches actually ask for — or against one listing, when the builder was
+ * opened from it with a jobId.
  *
  * One question at a time rather than a single long form. A CV is a lot to ask
  * for in one screen, and the people this exists for — students who have never
@@ -68,10 +69,29 @@ export default function CVBuilderScreen() {
     () => (params.jobId ? jobs.find((j) => j.id === params.jobId) ?? null : null),
     [params.jobId, jobs],
   );
-  const targetSkills = useMemo(
-    () => targetJob?.requiredSkills ?? [],
-    [targetJob],
-  );
+  /**
+   * What to measure the draft against.
+   *
+   * A specific listing when the builder was opened from one. Otherwise the
+   * skills the user's own job matches ask for most often — entered from the CV
+   * tab there is no single job to aim at, and without this the coverage bar
+   * would simply never appear. Frequency-ranked, so one unusual listing cannot
+   * put an exotic requirement in front of the user as though it were expected.
+   */
+  const targetSkills = useMemo(() => {
+    if (targetJob) return targetJob.requiredSkills ?? [];
+    const counts = new Map<string, number>();
+    for (const j of jobs) {
+      for (const sk of j.requiredSkills ?? []) {
+        const k = String(sk).toLowerCase().trim();
+        if (k) counts.set(k, (counts.get(k) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([k]) => k);
+  }, [targetJob, jobs]);
   const coverage = useMemo(
     () => coverageAgainst(draft, targetSkills),
     [draft, targetSkills],
@@ -201,10 +221,12 @@ export default function CVBuilderScreen() {
       </View>
 
       {/* ── Coverage against the job, when there is one ── */}
-      {targetJob && targetSkills.length > 0 && (
+      {targetSkills.length > 0 && (
         <View style={[styles.coverage, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
           <Text style={[styles.coverageTitle, { color: colors.mutedForeground }]} numberOfLines={1}>
-            AIMING AT: {targetJob.title.toUpperCase()}
+            {targetJob
+              ? `AIMING AT: ${targetJob.title.toUpperCase()}`
+              : `MOST ASKED FOR IN YOUR ${(user?.targetRole || "TARGET ROLE").toUpperCase()} MATCHES`}
           </Text>
           <View style={styles.chipWrap}>
             {coverage.covered.slice(0, 6).map((s) => (
@@ -220,7 +242,7 @@ export default function CVBuilderScreen() {
             ))}
           </View>
           <Text style={[styles.coverageHint, { color: colors.mutedForeground }]}>
-            {coverage.percent}% of what this job asks for. Amber terms aren't in your CV yet — add them only if you genuinely have them.
+            {coverage.percent}% covered. Amber terms aren't in your CV yet — add them only if you genuinely have them.
           </Text>
         </View>
       )}
