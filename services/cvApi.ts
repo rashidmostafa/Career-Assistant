@@ -8,7 +8,12 @@
  */
 import { apiFetch } from "./authApiService";
 
-export type CVFileKind = "pdf" | "docx";
+/**
+ * How a CV reached the app. "built" has no file behind it — the builder
+ * composes the text directly — but it is stored the same way so every consumer
+ * treats an authored CV and an uploaded one identically.
+ */
+export type CVFileKind = "pdf" | "docx" | "built";
 
 export interface ExtractedCV {
   text: string;

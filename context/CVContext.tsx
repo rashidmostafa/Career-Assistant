@@ -23,6 +23,8 @@ import { scoreCV, generateOptimisedCV, type CVReport, type OptimisedCV } from "@
 export const CV_FORMATS = ["Harvard", "MIT", "Corporate"] as const;
 export type KnownCVFormat = (typeof CV_FORMATS)[number];
 
+export type CVSource = "uploaded" | "built";
+
 export interface CVDocument {
   fileName: string;
   kind: CVFileKind;
@@ -31,6 +33,11 @@ export interface CVDocument {
   /** What the user says this CV was written in — one of CV_FORMATS or their own. */
   sourceFormat: string;
   uploadedAt: string;
+  /**
+   * Where this CV came from. Absent on records written before the builder
+   * existed, which are uploads by definition.
+   */
+  source?: CVSource;
 }
 
 /** Extracted, but the format question has not been answered yet. */
@@ -98,6 +105,13 @@ interface CVContextType {
   pickAndExtract: () => Promise<void>;
   /** Answers the format question and commits the pending CV. */
   confirmFormat: (format: string) => Promise<void>;
+  /** The two stored CVs, and which one the app is currently reading. */
+  uploadedCV: CVDocument | null;
+  builtCV: CVDocument | null;
+  activeSource: CVSource;
+  setActiveSource: (src: CVSource) => Promise<void>;
+  /** Stores a CV composed in the builder and scores it. */
+  saveBuiltCV: (rawText: string, format: string, name: string) => Promise<void>;
   discardPending: () => void;
   clearCV: () => Promise<void>;
   clearError: () => void;
@@ -110,7 +124,12 @@ const CVContext = createContext<CVContextType | undefined>(undefined);
 export function CVProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
 
-  const [cv, setCv] = useState<CVDocument | null>(null);
+  // Both are kept. Building a CV must not destroy an uploaded one the user
+  // spent longer on, and vice versa; `activeSource` decides which the rest of
+  // the app reads, so switching is free and reversible.
+  const [uploadedCV, setUploadedCV] = useState<CVDocument | null>(null);
+  const [builtCV, setBuiltCV] = useState<CVDocument | null>(null);
+  const [activeSource, setActiveSourceState] = useState<CVSource>("uploaded");
   const [pending, setPending] = useState<PendingCV | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
@@ -120,7 +139,27 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
   const [optimised, setOptimised] = useState<OptimisedCV | null>(null);
   const [isOptimising, setIsOptimising] = useState(false);
 
-  const storageKey = user ? `cv_${user.id}` : null;
+  const storageKey = user ? `cv_${user.id}` : null;          // uploaded, unchanged key
+  const builtKey   = user ? `cv_built_${user.id}` : null;
+  const sourceKey  = user ? `cv_source_${user.id}` : null;
+
+  /**
+   * What every other screen means by "the CV".
+   *
+   * Derived rather than stored, so it can never disagree with the two records
+   * behind it. Falls back to whichever exists when the preferred one does not,
+   * so a user who deletes their upload is not left with a null CV and a built
+   * one sitting unused.
+   */
+  const cv = useMemo<CVDocument | null>(
+    () => (activeSource === "built" ? builtCV ?? uploadedCV : uploadedCV ?? builtCV),
+    [activeSource, builtCV, uploadedCV],
+  );
+  const setCv = useCallback((doc: CVDocument | null) => {
+    // Uploads are the only thing that reaches the old setter.
+    setUploadedCV(doc);
+    if (doc) setActiveSourceState("uploaded");
+  }, []);
   const reportKey = user ? `cv_report_${user.id}` : null;
   const optimisedKey = user ? `cv_optimised_${user.id}` : null;
 
@@ -135,12 +174,26 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(storageKey);
-        const parsed = parseStoredCV(raw);
+        const [raw, rawBuilt, rawSource] = await Promise.all([
+          AsyncStorage.getItem(storageKey),
+          builtKey ? AsyncStorage.getItem(builtKey) : Promise.resolve(null),
+          sourceKey ? AsyncStorage.getItem(sourceKey) : Promise.resolve(null),
+        ]);
+        const parsedBuilt = parseStoredCV(rawBuilt);
+        if (rawBuilt && !parsedBuilt && builtKey) await AsyncStorage.removeItem(builtKey);
+        if (!cancelled) {
+          setBuiltCV(parsedBuilt);
+          setActiveSourceState(rawSource === "built" ? "built" : "uploaded");
+        }
+
+        const raw2 = raw;
+        const parsed0 = parseStoredCV(raw2);
+        // The active record is what the report and optimised copy belong to.
+        const parsed = (rawSource === "built" ? parsedBuilt ?? parsed0 : parsed0 ?? parsedBuilt);
         // A stored value we cannot use is cleared rather than left to fail the
         // same way on every launch.
-        if (raw && !parsed) await AsyncStorage.removeItem(storageKey);
-        if (!cancelled) setCv(parsed);
+        if (raw && !parsed0) await AsyncStorage.removeItem(storageKey);
+        if (!cancelled) setUploadedCV(parsed0);
 
         // A report belongs to one CV. If the CV is gone or was replaced, an old
         // report would describe a document the user is no longer looking at.
@@ -165,7 +218,7 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [storageKey]);
+  }, [storageKey, builtKey, sourceKey]);
 
   const pickAndExtract = useCallback(async () => {
     setError(null);
@@ -264,6 +317,47 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
     await runScoring(doc);
   }, [pending, storageKey, optimisedKey, runScoring]);
 
+  /**
+   * Stores a CV composed in the builder.
+   *
+   * Written as the same CVDocument an upload produces, so the roadmap gate,
+   * job matching and the ATS scorer treat it identically — that equivalence is
+   * the whole point, and it is why this does not get its own shape.
+   */
+  const saveBuiltCV = useCallback(async (rawText: string, format: string, name: string) => {
+    const text = rawText.trim();
+    if (!text) return;
+    const doc: CVDocument = {
+      fileName: `${(name || "cv").replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 48)}-built.txt`,
+      kind: "built",
+      rawText: text,
+      chars: text.length,
+      sourceFormat: format.trim() || "Unspecified",
+      uploadedAt: new Date().toISOString(),
+      source: "built",
+    };
+    setBuiltCV(doc);
+    setActiveSourceState("built");
+    setReport(null);
+    setOptimised(null);
+    if (builtKey) await AsyncStorage.setItem(builtKey, JSON.stringify(doc));
+    if (sourceKey) await AsyncStorage.setItem(sourceKey, "built");
+    if (optimisedKey) await AsyncStorage.removeItem(optimisedKey);
+    // Scored on save for the same reason an upload is: the score is the point,
+    // and making the user press a second button only delays it.
+    await runScoring(doc);
+  }, [builtKey, sourceKey, optimisedKey, runScoring]);
+
+  /** Switches which stored CV the rest of the app reads. */
+  const setActiveSource = useCallback(async (src: CVSource) => {
+    setActiveSourceState(src);
+    setReport(null);
+    setOptimised(null);
+    if (sourceKey) await AsyncStorage.setItem(sourceKey, src);
+    const doc = src === "built" ? builtCV : uploadedCV;
+    if (doc) await runScoring(doc);
+  }, [sourceKey, builtCV, uploadedCV, runScoring]);
+
   const optimise = useCallback(async (targetFormat: string) => {
     if (!cv || !targetFormat.trim()) return;
     setIsOptimising(true);
@@ -333,7 +427,7 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <CVContext.Provider
-      value={{ cv, skills, report, isScoring, optimised, isOptimising, optimise, clearOptimised, pending, isLoading, isUploading, error, pickAndExtract, confirmFormat, discardPending, clearCV, clearError, rescore }}
+      value={{ cv, skills, report, isScoring, optimised, isOptimising, optimise, clearOptimised, pending, isLoading, isUploading, error, pickAndExtract, confirmFormat, uploadedCV, builtCV, activeSource, setActiveSource, saveBuiltCV, discardPending, clearCV, clearError, rescore }}
     >
       {children}
     </CVContext.Provider>
