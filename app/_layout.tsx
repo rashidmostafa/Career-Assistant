@@ -179,6 +179,7 @@ function RootLayoutNav() {
                   <Stack.Screen name="auth-security" options={{ headerShown: false }} />
                   <Stack.Screen name="auth-recover"  options={{ headerShown: false, presentation: "modal" }} />
                   <Stack.Screen name="auth-sessions"  options={{ headerShown: false }} />
+                  <Stack.Screen name="cv-builder"    options={{ headerShown: false }} />
                   <Stack.Screen name="auth-audit-log" options={{ headerShown: false }} />
                   <Stack.Screen name="onboarding"    options={{ headerShown: false }} />
                 </Stack>
