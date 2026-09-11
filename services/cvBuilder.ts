@@ -100,11 +100,8 @@ export function draftIssues(draft: CVDraft): string[] {
   if (!c.fullName.trim()) out.push("Your name is missing.");
   if (!c.email.trim()) out.push("An email address is missing — employers need a way to reply.");
   else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(c.email.trim())) out.push("That email address doesn't look right.");
-  if (draft.education.length === 0 && draft.experience.length === 0) {
-    out.push("Add at least one education entry or one job.");
-  }
   if (draft.education.length === 0 && draft.experience.length === 0 && draft.projects.length === 0) {
-    out.push("Add a project so there is something to show.");
+    out.push("Add at least one education entry, one job, or one project.");
   }
   if (draft.skills.length === 0) out.push("List at least one skill.");
   return out;
