@@ -315,6 +315,7 @@ export default function OnboardingScreen() {
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
   const [roleSearch, setRoleSearch] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const suggestedRoles = useMemo(() => {
     if (!selectedBackground || !selectedLevel) return [];
@@ -350,8 +351,8 @@ export default function OnboardingScreen() {
       await completeOnboarding(bgLabel, levelLabel, selectedRole);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace("/(tabs)");
-    } catch {
-      // ignore
+    } catch (e: any) {
+      setError(e?.message ?? "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -545,6 +546,11 @@ export default function OnboardingScreen() {
             }
           />
           <View style={[styles.footer, { borderTopColor: colors.border, paddingBottom: insets.bottom + 16 }]}>
+            {error && (
+              <Text style={{ color: colors.destructive ?? "#ef4444", fontSize: 13, fontFamily: "Inter_500Medium", textAlign: "center", marginBottom: 10 }}>
+                {error}
+              </Text>
+            )}
             <TouchableOpacity
               style={[styles.nextBtn, { backgroundColor: selectedRole ? colors.primary : colors.muted, opacity: loading ? 0.7 : 1 }]}
               onPress={handleFinish}
