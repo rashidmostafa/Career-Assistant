@@ -205,6 +205,8 @@ UserSchema.methods.toSafeObject = function () {
   delete obj.backupCodes;
   delete obj.securityQuestions;
   delete obj.biometricTokenHash;
+  delete obj.emailVerifyToken;
+  delete obj.emailVerifyExpires;
   return obj;
 };
 
