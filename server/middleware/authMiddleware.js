@@ -22,6 +22,7 @@ async function authenticate(req, res, next) {
     let payload;
     try {
       payload = jwt.verify(token, JWT_SECRET);
+      if (payload.type !== "access") throw new Error("Invalid token type");
     } catch (e) {
       if (e.name === "TokenExpiredError") {
         return res.status(401).json({ message: "Access token expired.", code: "TOKEN_EXPIRED" });
@@ -51,8 +52,10 @@ async function optionalAuth(req, res, next) {
   if (!authHeader?.startsWith("Bearer ")) return next();
   try {
     const payload = jwt.verify(authHeader.slice(7), JWT_SECRET);
-    const user = await User.findById(payload.sub);
-    if (user) { req.userId = user._id.toString(); req.user = user.toSafeObject(); }
+    if (payload.type === "access") {
+      const user = await User.findById(payload.sub);
+      if (user) { req.userId = user._id.toString(); req.user = user.toSafeObject(); }
+    }
   } catch (_) {}
   next();
 }
@@ -86,7 +89,9 @@ function issueRefreshToken(userId, deviceId) {
 }
 
 function verifyRefreshToken(token) {
-  return jwt.verify(token, JWT_SECRET);
+  const payload = jwt.verify(token, JWT_SECRET);
+  if (payload.type !== "refresh") throw new Error("Invalid token type");
+  return payload;
 }
 
 module.exports = { authenticate, optionalAuth, issueAccessToken, issueRefreshToken, verifyRefreshToken };
