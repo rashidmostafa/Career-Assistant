@@ -67,7 +67,7 @@ function parseStoredCV(raw: string | null): CVDocument | null {
       typeof d.rawText === "string" && d.rawText.length > 0 &&
       typeof d.fileName === "string" &&
       typeof d.chars === "number" &&
-      (d.kind === "pdf" || d.kind === "docx") &&
+      (d.kind === "pdf" || d.kind === "docx" || d.kind === "built") &&
       typeof d.sourceFormat === "string"
     ) {
       return d as CVDocument;
