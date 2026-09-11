@@ -234,16 +234,5 @@ const styles = StyleSheet.create({
   actionLabel: { fontSize: 16, fontFamily: "Inter_700Bold", marginBottom: 3, letterSpacing: -0.2 },
   actionDesc: { fontSize: 13, fontFamily: "Inter_500Medium" },
   actionArrow: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
-  progressCard: { borderRadius: 20, padding: 20, borderWidth: 1 },
-  progressRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  progressLabel: { fontFamily: "Inter_700Bold", fontSize: 15, flex: 1, paddingRight: 12 },
-  progressPct: { fontFamily: "Inter_700Bold", fontSize: 22, letterSpacing: -0.5 },
-  progressBar: { height: 8, borderRadius: 4, overflow: "hidden", marginBottom: 10 },
-  progressFill: { height: "100%", borderRadius: 4 },
-  progressSub: { fontFamily: "Inter_500Medium", fontSize: 12 },
-  cvCard: { borderRadius: 20, padding: 20, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  cvScore: { fontFamily: "Inter_700Bold", fontSize: 36, letterSpacing: -1 },
-  cvScoreMax: { fontSize: 18, fontFamily: "Inter_500Medium" },
-  cvLabel: { fontFamily: "Inter_700Bold", fontSize: 16, marginTop: 4, marginBottom: 4 },
-  cvNote: { fontFamily: "Inter_500Medium", fontSize: 13, lineHeight: 19 },
+
 });
