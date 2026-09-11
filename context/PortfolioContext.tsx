@@ -196,7 +196,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
         username,
         repos: data.public_repos || 0,
         stars,
-        commits: Math.floor(Math.random() * 500) + 100,
+        commits: 0,
         topLanguages,
       };
       const base: Portfolio = portfolioRef.current || {
