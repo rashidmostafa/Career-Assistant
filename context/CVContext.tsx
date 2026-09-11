@@ -414,14 +414,17 @@ export function CVProvider({ children }: { children: React.ReactNode }) {
 
   const clearCV = useCallback(async () => {
     setCv(null);
+    setBuiltCV(null);
     setPending(null);
     setError(null);
     setReport(null);
     setOptimised(null);
     if (storageKey) await AsyncStorage.removeItem(storageKey);
+    if (builtKey) await AsyncStorage.removeItem(builtKey);
+    if (sourceKey) await AsyncStorage.removeItem(sourceKey);
     if (reportKey) await AsyncStorage.removeItem(reportKey);
     if (optimisedKey) await AsyncStorage.removeItem(optimisedKey);
-  }, [storageKey]);
+  }, [storageKey, builtKey, sourceKey, reportKey, optimisedKey]);
 
   const clearError = useCallback(() => setError(null), []);
 
