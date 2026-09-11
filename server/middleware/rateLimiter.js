@@ -25,7 +25,8 @@ const { MongoRateLimitStore } = require("./mongoRateLimitStore");
 // one (e.g. a raw script hitting the API directly).
 function rateLimitKey(req, prefix = "") {
   const deviceId = req.headers["x-device-id"];
-  const key = deviceId ? `device_${deviceId}` : (req.ip ?? "unknown");
+  const ip = req.ip ?? "unknown";
+  const key = deviceId ? `${ip}_${deviceId}` : ip;
   return prefix ? `${prefix}_${key}` : key;
 }
 
