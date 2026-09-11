@@ -161,7 +161,7 @@ UserSchema.pre("save", async function (next) {
 UserSchema.pre("save", async function (next) {
   if (!this.isModified("passwordHash")) return next();
   // passwordHash field receives plaintext password on set, then gets hashed
-  if (!this.passwordHash.startsWith("$2")) {
+  if (this.passwordHash && !this.passwordHash.startsWith("$2")) {
     this.passwordHash = await bcrypt.hash(this.passwordHash, 12);
   }
   next();
