@@ -1,4 +1,4 @@
-import { Edit2, X, LogOut, Check, Camera, Trash2, AlertTriangle, ChevronDown, ShieldCheck, ChevronRight, Briefcase, FileText } from "lucide-react-native";
+import { Edit2, X, LogOut, Check, Camera, AlertTriangle, ChevronDown, ShieldCheck, ChevronRight, Briefcase } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
