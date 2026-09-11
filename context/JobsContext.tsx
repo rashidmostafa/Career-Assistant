@@ -315,7 +315,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             matched: match.matched,
             missing: match.missing,
           },
-          experienceLevel: level,
+          experienceLevel: level ?? "Any",
           jobType: j.type,
           // Read from the source list rather than hardcoded, so a listing never
           // inherits an icon belonging to a board it did not come from.
