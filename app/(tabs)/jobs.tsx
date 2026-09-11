@@ -652,7 +652,7 @@ export default function JobsScreen() {
                     <>
                       {match ? <Check size={15} color={colors.success} /> : <Edit2 size={15} color={colors.foreground} />}
                       <Text style={[styles.coverBtnSmallText, { color: match ? colors.success : colors.foreground }]}>
-                        {match ? "Cover Letter" : "Cover Letter"}
+                        {match ? "View Letter" : "Write Letter"}
                       </Text>
                     </>
                   )}
