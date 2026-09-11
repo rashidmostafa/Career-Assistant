@@ -12,6 +12,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -372,6 +373,18 @@ export default function ProfileScreen() {
 
         <Animated.View entering={FadeInDown.duration(500).delay(140).springify().damping(14)} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.mutedForeground }]}>Career Profile</Text>
+          {editing && (
+            <View style={[styles.fieldRow, { marginBottom: 12 }]}>
+              <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Name</Text>
+              <TextInput
+                style={[styles.fieldValue, { color: colors.foreground, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 4 }]}
+                value={name}
+                onChangeText={setName}
+                placeholder="Your name"
+                placeholderTextColor={colors.mutedForeground}
+              />
+            </View>
+          )}
           <DropField label="Background" value={background} placeholder="Select background" onPress={() => setActivePicker("background")} error={fieldErrors.background} />
           <DropField
             label="Experience Level"
