@@ -97,6 +97,8 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
         setError(
           result.reason === "no_ai"
             ? "AI isn't configured, so a roadmap can't be generated yet."
+            : result.reason === "rate_limited"
+            ? `The AI is at its rate limit. Try again in about ${result.retryAfterSec ?? 30} seconds.`
             : result.reason === "unreachable"
             ? "Couldn't reach the AI. Check your connection and try again."
             : "The AI returned something unusable. Try again."
