@@ -293,9 +293,11 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     // the sheet was covering it, which read as "adding a link does nothing".
     // The metrics land in their own state update whenever they arrive.
     if (platform.id === "github") {
-      void syncGithub(link.label).catch(() => { /* card works without metrics */ });
+      const handle = deriveLabel(url, platform);
+      void syncGithub(handle).catch(() => { /* card works without metrics */ });
     } else if (platform.id === "codeforces") {
-      void syncCodeforces(link.label).catch(() => { /* card works without metrics */ });
+      const handle = deriveLabel(url, platform);
+      void syncCodeforces(handle).catch(() => { /* card works without metrics */ });
     }
   };
 
