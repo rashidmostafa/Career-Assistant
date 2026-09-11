@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, Map, FileText, Mic, ChevronRight, Zap, Award } from "lucide-react-native";
+import { BriefcaseBusiness, Map, FileText, Mic, ChevronRight, Zap } from "lucide-react-native";
 import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
