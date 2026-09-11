@@ -220,7 +220,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       const data = await res.json();
       if (data.status !== "OK") throw new Error("Codeforces handle not found");
       const info = data.result[0];
-      const subsRes = await fetch(
+      const subsRes = await fetchWithTimeout(
         `https://codeforces.com/api/user.status?handle=${handle}&from=1&count=1000`
       );
       const subsData = await subsRes.json();
