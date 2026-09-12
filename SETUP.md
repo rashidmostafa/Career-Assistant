@@ -37,6 +37,9 @@ interview feedback. To enable it:
 2. Fill in `EXPO_PUBLIC_OPENAI_API_KEY` with your own OpenAI API key.
 3. Restart `npm run start`.
 
+Without this key, the app automatically falls back to built-in heuristic
+scoring/generation, so all features still work out of the box.
+
 ## If Expo Go shows "Unknown error: The internet connection appears to be offline"
 
 1. Stop the current Expo process.
@@ -53,9 +56,6 @@ If your local network is healthy and you want faster LAN mode, run:
 ```
 npm run start:lan
 ```
-
-Without this key, the app automatically falls back to built-in heuristic
-scoring/generation, so all features still work out of the box.
 
 ## Building an APK
 
