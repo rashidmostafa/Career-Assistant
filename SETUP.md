@@ -30,15 +30,20 @@
 
 ## Optional: AI features
 
-This app can use OpenAI to power CV analysis, roadmap generation, and
-interview feedback. To enable it:
+CV analysis, roadmap generation and interview feedback are powered by an LLM
+behind the backend in `server/` — the app never holds an API key itself. To
+enable it:
 
 1. Copy `.env.example` to a new file named `.env`.
-2. Fill in `EXPO_PUBLIC_OPENAI_API_KEY` with your own OpenAI API key.
+2. Set `EXPO_PUBLIC_API_URL` to a running backend. The hosted one is
+   `https://career-assistant-api.onrender.com`; see `docs/DEPLOYMENT.md` to
+   run your own.
 3. Restart `npm run start`.
 
-Without this key, the app automatically falls back to built-in heuristic
-scoring/generation, so all features still work out of the box.
+The model provider and key live on the server (`AI_API_KEY`, `AI_BASE_URL`,
+`AI_MODEL` — defaults to Gemini). Without a backend URL, the app automatically
+falls back to built-in heuristic scoring/generation, so all features still
+work out of the box.
 
 ## If Expo Go shows "Unknown error: The internet connection appears to be offline"
 

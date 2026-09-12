@@ -41,13 +41,21 @@ npm run start
 
 ## 🤖 AI Features (Optional)
 
-To enable real AI analysis, create a `.env` file in the project root:
+AI calls (CV analysis, roadmap generation, interview feedback) go through the
+backend in `server/`, not straight from the phone — so there is no API key in
+the app. To enable them, point the app at a running backend by creating a
+`.env` file in the project root:
 
 ```
-EXPO_PUBLIC_OPENAI_API_KEY=sk-your-key-here
+EXPO_PUBLIC_API_URL=https://career-assistant-api.onrender.com
 ```
 
-Without a key, the app uses smart built-in fallbacks for all AI features.
+The model itself is configured on the server via `AI_API_KEY`, `AI_BASE_URL`
+and `AI_MODEL` — any OpenAI-compatible endpoint works; the default is Gemini
+(`gemini-3.5-flash-lite`). See `server/.env.example`, and
+`docs/HAWK_INTEGRATION.md` for the self-hosted Hawk model.
+
+Without a backend URL, the app uses built-in fallbacks for all AI features.
 
 ---
 
