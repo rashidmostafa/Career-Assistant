@@ -1,0 +1,20 @@
+# EditorConfig: https://editorconfig.org
+# Mirrors the formatting the codebase already uses (2-space, LF, no trailing
+# whitespace) so editors stop fighting git over line endings and indentation.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Markdown: two trailing spaces are a hard line break, and numbered-list
+# continuation lines are indented 3, so leave both alone.
+[*.md]
+trim_trailing_whitespace = false
+indent_size = unset
+
