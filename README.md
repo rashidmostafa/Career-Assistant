@@ -39,6 +39,24 @@ npm run start
 
 ---
 
+## 🗂 Project structure
+
+| Path | What lives there |
+|------|------------------|
+| [`app/`](app/) | Screens and navigation (Expo Router file-based routes) |
+| [`components/`](components/), [`hooks/`](hooks/), [`constants/`](constants/) | UI building blocks, shared hooks, theme and platform constants |
+| [`context/`](context/) | React contexts holding each feature's state (CV, jobs, roadmap, interview, portfolio) |
+| [`services/`](services/) | API clients and the feature engines (CV scoring, roadmap generation, job matching, AI client) |
+| [`utils/`](utils/) | Pure helpers |
+| [`__tests__/`](__tests__/) | Jest suite for the app — see its [README](__tests__/README.md) |
+| [`server/`](server/) | Express + MongoDB backend: auth, AI proxy, jobs, CV parsing, sync — see its [README](server/README.md) |
+| [`scripts/`](scripts/) | `free-port.js` (used by `npm start`), `preflight.js` (checks an APK's backend), `build.js` |
+| [`web/`](web/) | Static landing, privacy and terms pages |
+| [`docs/`](docs/) | [Auth design](docs/AUTH_DOCUMENTATION.md), [deployment](docs/DEPLOYMENT.md), [OAuth setup](docs/EXPO_GO_OAUTH_SETUP.md), [Hawk model](docs/HAWK_INTEGRATION.md), [backend troubleshooting](docs/TROUBLESHOOTING.md) |
+| [`render.yaml`](render.yaml), [`eas.json`](eas.json) | Backend deployment (Render) and app build profiles (EAS) |
+
+---
+
 ## 🤖 AI Features (Optional)
 
 AI calls (CV analysis, roadmap generation, interview feedback) go through the
@@ -66,6 +84,10 @@ Without a backend URL, the app uses built-in fallbacks for all AI features.
 - Expo Go app on your phone (iOS or Android)
 
 ## Troubleshooting
+
+The items below are about getting the app to start in Expo Go. For sign-in,
+OTP, OAuth, token or database problems see
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 **Metro bundler error on start:**
 ```bash
