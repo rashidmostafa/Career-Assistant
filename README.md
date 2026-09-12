@@ -7,22 +7,17 @@ An AI-powered career assistant built with React Native + Expo.
 ### 1. Install Node.js (if not installed)
 Download Node.js 22 LTS from https://nodejs.org
 
-### 2. Install Expo CLI
-```bash
-npm install -g expo-cli
-```
-
-### 3. Install dependencies
+### 2. Install dependencies
 ```bash
 npm install
 ```
 
-### 4. Start the app
+### 3. Start the app
 ```bash
 npm run start
 ```
 
-### 5. Open on your phone
+### 4. Open on your phone
 - Install **Expo Go** from the App Store or Google Play
 - Scan the QR code shown in the terminal with your phone camera (iOS) or the Expo Go app (Android)
 
