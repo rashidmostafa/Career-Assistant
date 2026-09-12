@@ -18,16 +18,18 @@ cd ~/Documents/Hawk
 curl localhost:8000/health
 ```
 
-Then point the app at it and **rebuild** — `EXPO_PUBLIC_*` is inlined at build
-time, not read at runtime:
+Then point the **backend** at it. The app never talks to Hawk directly — every
+call goes to `POST /api/ai/hawk/:task` on the server in `server/`, which
+forwards it — so this is a server environment variable, not an app rebuild:
 
 ```
-EXPO_PUBLIC_HAWK_URL=http://192.168.0.8:8000    # this machine's LAN IP
+HAWK_URL=http://192.168.0.8:8000    # the GPU box, as reachable from the server
+HAWK_SECRET=change-me               # sent as X-Hawk-Secret; serve_hawk has no auth of its own
 ```
 
-The phone must be on the same Wi-Fi. Leave the variable blank to disable Hawk
-entirely; every call then returns `null` and the app falls back to its
-deterministic logic, exactly as before.
+Leave `HAWK_URL` blank to disable Hawk entirely; every call then returns
+`null` and the app falls back to its deterministic logic, exactly as before.
+`GET /api/ai/status` reports whether Hawk is configured and reachable.
 
 ### Endpoints
 
@@ -60,7 +62,8 @@ path.** This is not an oversight — each one was measured and rejected:
 | ATS score via `ats_scorer` | Trained on 4 dimensions (`format_structure`, `keyword_optimization`, `content_quality`, `parsing_ability`); the app's UI needs 6 (`keyword`, `formatting`, `achievements`, `skills`, `experience`, `grammar`). Not a mapping, a different rubric. |
 | Cover letters, CV rewrites, answer scoring | Hawk is measurably **worse than its own base model** at these — the fine-tune cost it its long-form ability. These stay on `aiClient`. |
 
-So the app still needs `EXPO_PUBLIC_OPENAI_API_KEY`. Hawk does not replace it.
+So the backend still needs a general-purpose model (`AI_API_KEY`,
+`AI_BASE_URL`, `AI_MODEL`). Hawk does not replace it.
 
 ### Interview questions
 
@@ -70,8 +73,8 @@ silently — the bank has already filled every slot before Hawk is consulted.
 
 **Known limitation:** Hawk's questions are role-blind. A *Data Scientist* prompt
 returns JavaScript trivia; a *Product Manager* prompt returns React questions.
-For non-web roles you may want to leave `EXPO_PUBLIC_HAWK_URL` unset until the
-model is retrained. Generated questions also carry no vetted `correctAnswer` —
+For non-web roles you may want to leave `HAWK_URL` unset on the server until
+the model is retrained. Generated questions also carry no vetted `correctAnswer` —
 that field is filled at scoring time by `aiClient`.
 
 ---
@@ -102,12 +105,15 @@ before calling one.
 
 ## Going beyond the LAN
 
-The current setup requires the phone on the same Wi-Fi as the GPU box.
+Because calls are proxied through `server/`, the phone no longer needs to be
+on the same Wi-Fi as the GPU box — only the backend does. The proxy reuses the
+JWT auth and per-account rate limiting already there, and adds `HAWK_SECRET`
+as an `X-Hawk-Secret` header upstream. What remains is getting the *backend*
+to the GPU box:
 
-- **Tunnel (ngrok/cloudflared)** — works off-network, but the endpoint becomes
-  public. Add a shared-secret header before doing this; the server has no auth.
-- **Proxy through `server/`** — reuses the JWT auth and rate limiting already
-  there, but Render still has to reach the GPU box through a tunnel.
+- **Tunnel (ngrok/cloudflared)** — set `HAWK_URL` to the tunnel address. Set
+  `HAWK_SECRET` first; the tunnel makes `serve_hawk` reachable from the
+  internet and it has no authentication of its own.
 - **Cloud GPU host** — the only option that does not depend on your machine
   being switched on. The server is a plain FastAPI app; the Dockerfile is
   ROCm-based and would need a CUDA base image for most cloud GPUs.
